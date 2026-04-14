@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football AI Analysis Hub</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00ff88;
+            --secondary: #121212;
+            --accent: #00bcd4;
+            --glass: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background: var(--secondary);
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 60px;
+            animation: fadeInDown 1s ease;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: 800;
+            background: linear-gradient(45deg, var(--primary), var(--accent));
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 30px;
+            animation: fadeInUp 1s ease 0.2s backwards;
+        }
+
+        .card {
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            opacity: 0.3;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+
+        .video-container {
+            width: 100%;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        video {
+            width: 100%;
+            display: block;
+        }
+
+        .heatmap-container img {
+            width: 100%;
+            height: auto;
+            border-radius: 16px;
+            filter: drop-shadow(0 10px 20px rgba(0, 255, 136, 0.1));
+        }
+
+        .stats-list {
+            list-style: none;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .btn {
+            background: linear-gradient(45deg, var(--primary), var(--accent));
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            color: #000;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0, 255, 136, 0.3);
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            flex-direction: column;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid var(--border);
+            border-top: 6px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading-overlay" id="loader">
+        <div class="spinner"></div>
+        <p>AI가 영상을 정밀 분석하고 있습니다... (약 1~2분 소요)</p>
+    </div>
+
+    <div class="container">
+        <header>
+            <div class="logo">GOAL VISION AI</div>
+            <button class="btn" onclick="startAnalysis()">신규 영상 분석 시작</button>
+        </header>
+
+        {% if has_results %}
+        <div class="dashboard-grid">
+            <div class="video-card card">
+                <h2>AI Detection & Tracking</h2>
+                <div class="video-container">
+                    <video controls muted autoplay loop>
+                        <source src="{{ url_for('static', filename='videos/detected_video.mp4') }}" type="video/mp4">
+                        브라우저가 비디오 태그를 지원하지 않습니다.
+                    </video>
+                </div>
+            </div>
+
+            <div class="side-panel">
+                <div class="heatmap-card card" style="margin-bottom: 30px;">
+                    <h2>Tactical Heatmap</h2>
+                    <div class="heatmap-container">
+                        <img src="{{ url_for('static', filename='images/heatmap.png') }}" alt="Heatmap">
+                    </div>
+                </div>
+
+                <div class="stats-card card">
+                    <h2>Match Statistics</h2>
+                    <ul class="stats-list" id="statsList">
+                        <li class="stat-item">
+                            <span>총 활동 데이터</span>
+                            <span class="stat-value">분석 완료</span>
+                        </li>
+                        <!-- 데이터는 JS로 주입 -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="card" style="text-align: center; padding: 100px;">
+            <h1 style="font-size: 3rem; margin-bottom: 20px;">당신의 축구를 AI로 분석하세요.</h1>
+            <p style="opacity: 0.7; margin-bottom: 40px;">영상을 업로드하면 AI가 선수별 히트맵, 활동량 및 하이라이트를 생성합니다.</p>
+            <button class="btn" style="padding: 20px 50px; font-size: 1.2rem;" onclick="startAnalysis()">샘플 영상으로
+                시작하기</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function startAnalysis() {
+            document.getElementById('loader').style.display = 'flex';
+            fetch('/analyze', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        location.reload();
+                    } else {
+                        alert('분석 중 오류가 발생했습니다.');
+                        document.getElementById('loader').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('loader').style.display = 'none';
+                });
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,9 @@
+ultralytics
+opencv-python
+flask
+pandas
+numpy
+matplotlib
+supervision
+roboflow
+requests
