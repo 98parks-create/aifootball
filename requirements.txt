@@ -8,3 +8,4 @@ matplotlib
 supervision
 scipy
 requests
+Pillow

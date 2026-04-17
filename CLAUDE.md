@@ -86,3 +86,4 @@ aifootball/
 ## 작업 이력
 - 2026-04-17: 초기 구조 정리 — ABOUT-ME/PROJECT/DOCS/RESULT 폴더 생성, models/ 폴더 분리, .gitignore 추가, 모델 경로 `models/yolov8s.pt`로 통일
 - 2026-04-17: 품질 대형 업그레이드 — analyzer.py 전체 재작성 (실제 km/h 계산, 스프린트 감지, 타이틀카드/페이드/슬로우모션 영상), app.py 비동기 처리(threading + /results 엔드포인트), index.html 폴링 방식 전환, flask-cors 의존성 추가
+- 2026-04-17: 추적 정확도 & UX 개선 — detector.py: 속도 벡터 예측 + 유니폼 색상 유사도 + 팀 컬러 필터 결합 위치 재탐색 (상대팀 0.15 패널티, 최소 score 0.22 임계값), 팀 인식 appearance re-ID 추가, 초기 락온 반경 180px. analyzer.py: 미니맵 제거(우측 상단 검은 박스), 타겟 인디케이터 1.5초 표시 후 0.7초 페이드 아웃, 속도 계산 윈도우 ±8 프레임, 클립 유효성 검사(타겟 20% 미만 추적 클립 제외)

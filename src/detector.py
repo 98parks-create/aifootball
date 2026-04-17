@@ -27,6 +27,7 @@ class FootballDetector:
         self._target_hist = None
         self._target_hist_count = 0
         self._team_centers = None   # K-means team color centroids
+        self._target_velocity = np.array([0.0, 0.0])  # pixel/frame velocity
 
     # ── Appearance Re-ID ─────────────────────────────────────────────────────
 
@@ -67,6 +68,26 @@ class FootballDetector:
             if h is None:
                 continue
             s = cv2.compareHist(self._target_hist, h, cv2.HISTCMP_CORREL)
+            if s > best_s:
+                best_s, best_i = s, i
+        return best_i
+
+    def _best_appearance_match_team(self, frame, dets, target_team, tid_team, threshold=0.40):
+        """Appearance re-ID with team-aware penalty."""
+        if self._target_hist is None:
+            return None
+        best_i, best_s = None, threshold
+        for i in range(len(dets)):
+            if dets.class_id[i] != 0:
+                continue
+            h = self._extract_jersey_hist(frame, dets.xyxy[i])
+            if h is None:
+                continue
+            s = cv2.compareHist(self._target_hist, h, cv2.HISTCMP_CORREL)
+            t_id = int(dets.tracker_id[i]) if dets.tracker_id is not None else -1
+            t_team = tid_team.get(t_id, -1)
+            if target_team != -1 and t_team != -1 and t_team != target_team:
+                s *= 0.15  # 상대팀 강력 패널티
             if s > best_s:
                 best_s, best_i = s, i
         return best_i
@@ -225,41 +246,72 @@ class FootballDetector:
                         if len(where):
                             found_i = where[0]
                             xyxy = dets.xyxy[found_i]
-                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            new_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            if last_px is not None:
+                                vel = np.array(new_px) - np.array(last_px)
+                                self._target_velocity = 0.75 * self._target_velocity + 0.25 * vel
+                            last_px = new_px
                             self._update_target_hist(frame, xyxy)
                             found = True
                             frames_lost = 0
 
-                    # ── 2. Position-based recovery (< 2s, < 200px) ───────
+                    # ── 2. Position + jersey + team re-lock (< 2s) ───────
                     if not found and last_px is not None and frames_lost < PROXY_WIN:
-                        best_i, best_d = None, 200.0
+                        # 속도 예측으로 예상 위치 계산
+                        pred = np.array(last_px) + self._target_velocity * min(frames_lost, PROXY_WIN)
+                        pred = np.clip(pred, [0, 0], [W, H])
+
+                        best_i, best_score = None, -1.0
                         for i in range(len(dets)):
                             if dets.class_id[i] != 0:
                                 continue
                             xyxy = dets.xyxy[i]
-                            cx = (xyxy[0]+xyxy[2])/2
-                            cy = (xyxy[1]+xyxy[3])/2
-                            d = np.hypot(cx - last_px[0], cy - last_px[1])
-                            if d < best_d:
-                                best_d, best_i = d, i
-                        if best_i is not None:
+                            cx = (xyxy[0] + xyxy[2]) / 2
+                            cy = (xyxy[1] + xyxy[3]) / 2
+                            d = np.hypot(cx - pred[0], cy - pred[1])
+                            if d > 280:
+                                continue
+                            # 유니폼 색상 유사도
+                            sim = 0.35
+                            if self._target_hist is not None:
+                                h = self._extract_jersey_hist(frame, xyxy)
+                                if h is not None:
+                                    sim = max(0.0, cv2.compareHist(
+                                        self._target_hist, h, cv2.HISTCMP_CORREL))
+                            # 상대팀 패널티
+                            t_id = int(dets.tracker_id[i]) if dets.tracker_id is not None else -1
+                            t_team = tid_team.get(t_id, -1)
+                            if target_team != -1 and t_team != -1 and t_team != target_team:
+                                sim *= 0.15
+                            score = 0.35 * max(0.0, 1.0 - d / 280.0) + 0.65 * sim
+                            if score > best_score:
+                                best_score = score
+                                best_i = i
+
+                        if best_i is not None and best_score >= 0.22:
                             target_id = int(dets.tracker_id[best_i])
                             found_i = best_i
                             xyxy = dets.xyxy[best_i]
-                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            new_px = [(xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2]
+                            vel = (np.array(new_px) - np.array(last_px)) / max(frames_lost, 1)
+                            self._target_velocity = 0.6 * self._target_velocity + 0.4 * vel
+                            last_px = new_px
                             self._update_target_hist(frame, xyxy)
                             found = True
                             frames_lost = 0
-                            print(f"[TAD] Position re-lock f={idx} id={target_id}")
+                            print(f"[TAD] Pos re-lock f={idx} id={target_id} score={best_score:.2f}")
 
-                    # ── 3. Appearance re-ID (after long absence) ─────────
+                    # ── 3. Appearance re-ID with team filter (> 4s) ──────
                     if not found and frames_lost >= APPEAR_WIN:
-                        best_i = self._best_appearance_match(frame, dets, threshold=0.40)
+                        best_i = self._best_appearance_match_team(
+                            frame, dets, target_team, tid_team, threshold=0.40)
                         if best_i is not None:
                             target_id = int(dets.tracker_id[best_i])
                             found_i = best_i
                             xyxy = dets.xyxy[best_i]
-                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            new_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._target_velocity = np.array([0.0, 0.0])  # 긴 공백 후 초기화
+                            last_px = new_px
                             self._update_target_hist(frame, xyxy)
                             found = True
                             frames_lost = 0
@@ -267,7 +319,7 @@ class FootballDetector:
 
                     # ── 4. Initial lock ───────────────────────────────────
                     if target_id is None:
-                        best_i, best_d = None, 140.0
+                        best_i, best_d = None, 180.0
                         for i in range(len(dets)):
                             if dets.class_id[i] != 0:
                                 continue
@@ -282,9 +334,10 @@ class FootballDetector:
                             found_i = best_i
                             xyxy = dets.xyxy[best_i]
                             last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._target_velocity = np.array([0.0, 0.0])
                             self._update_target_hist(frame, xyxy)
                             found = True
-                            print(f"[TAD] Initial lock id={target_id}")
+                            print(f"[TAD] Initial lock id={target_id} dist={best_d:.0f}px")
 
                     if not found:
                         frames_lost += 1

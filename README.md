@@ -30,15 +30,31 @@ aifootball/
 └── README.md
 ```
 
-## 📈 진행 상황 (MVP)
+## 📈 진행 상황
+
+### v1 — MVP
 - [x] 프로젝트 초기화 및 폴더 구조 세팅
-- [x] Git 저장소 초기화
-- [x] 가상환경 및 종속성 설치 (ultralytics, supervision, flask 등)
-- [x] 샘플 영상 확보 완료 (`data/uploads/sample.mp4`)
-- [x] AI 탐지 및 추적 테스트 완료 (`data/processed/detected_sample.mp4`)
-- [x] 원근 변환(Perspective Transformation) 엔진 구현 완료
-- [x] 히트맵 및 스탯 생성 로직 통합 완료
-- [/] 프리미엄 웹 대시보드 (Flask + Modern UI) 개발 및 배포 중
+- [x] YOLO + ByteTrack 탐지/추적 파이프라인
+- [x] 원근 변환(Perspective Transformation) 엔진
+- [x] 히트맵 및 스탯 생성 로직
+- [x] 프리미엄 웹 대시보드 (Flask + Modern UI)
+
+### v2 — 품질 업그레이드 (2026-04-17)
+- [x] 비동기 분석 (threading + 진행률 폴링)
+- [x] 실제 km/h 속도 계산 + 스프린트 감지
+- [x] 타이틀카드/페이드/슬로우모션 하이라이트
+- [x] FIFA 카드 UI + 섹션 탭 필터
+- [x] 로그인/회원가입 + 히스토리
+
+### v3 — 추적 정확도 & UX 개선 (2026-04-17)
+- [x] **타겟 추적 강화**: 속도 벡터 예측 + 유니폼 색상 유사도 + 팀 컬러 필터 결합
+  - 위치 기반 재탐색 시 상대팀 선수에 0.15 패널티 적용
+  - 예상 위치 = 마지막 위치 + 속도 × 경과 프레임으로 보정
+- [x] **타겟 인디케이터 페이드**: 클립 시작 1.5초 표시 후 0.7초에 걸쳐 페이드 아웃
+- [x] **미니맵 제거**: 우측 상단 검은 박스 제거, 클린 UI
+- [x] **속도 계산 개선**: ±8 프레임 윈도우로 지터 감소 (기존 ±5)
+- [x] **클립 유효성 검사**: 타겟 선수가 클립의 20% 미만으로 추적된 클립 제외
+- [x] **팀 인식 재탐색**: 외모 기반 재식별 시 팀 컬러 활용
 
 ---
-*Developed by Antigravity (Advanced Agentic Coding AI)*
+*TAD AI — AI Football Analysis Platform for Youth & Amateur Players*
