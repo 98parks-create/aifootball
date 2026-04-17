@@ -1,83 +1,156 @@
-from flask import Flask, render_template, request, send_from_directory, jsonify
-import os
-import cv2
-import json
-import uuid
-import threading
+from flask import Flask, render_template, request, send_from_directory, jsonify, session
+import os, cv2, json, uuid, threading, sqlite3
 import numpy as np
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
 from datetime import datetime
 from src.detector import FootballDetector
 
+# ── App setup ──────────────────────────────────────────────────────────────────
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, (np.integer, np.int64)): return int(obj)
-        elif isinstance(obj, (np.floating, np.float64)): return float(obj)
-        elif isinstance(obj, np.ndarray): return obj.tolist()
+        if isinstance(obj, (np.integer, np.int64)):  return int(obj)
+        if isinstance(obj, (np.floating, np.float64)): return float(obj)
+        if isinstance(obj, np.ndarray):              return obj.tolist()
         return super().default(obj)
 
 app = Flask(__name__)
 app.json.cls = NumpyEncoder
+app.secret_key = os.environ.get('SECRET_KEY', 'tad-ai-secret-2026-football-platform')
 CORS(app)
 
-BASE_STORAGE = r"D:\aifootball_data"
-UPLOAD_FOLDER = os.path.join(BASE_STORAGE, 'uploads')
-PROCESSED_FOLDER = os.path.join(BASE_STORAGE, 'processed')
-CALIBRATION_FOLDER = os.path.join(BASE_STORAGE, 'calibration')
-HIGHLIGHT_FOLDER = os.path.join(BASE_STORAGE, 'highlights')
-HISTORY_FILE = os.path.join(BASE_STORAGE, 'analysis_history.json')
+# ── Storage paths ───────────────────────────────────────────────────────────────
+BASE        = r"D:\aifootball_data"
+UPLOAD_DIR  = os.path.join(BASE, 'uploads')
+PROC_DIR    = os.path.join(BASE, 'processed')
+CALIB_DIR   = os.path.join(BASE, 'calibration')
+HL_DIR      = os.path.join(BASE, 'highlights')
+DB_PATH     = os.path.join(BASE, 'tad.db')
 
-for folder in [UPLOAD_FOLDER, PROCESSED_FOLDER, CALIBRATION_FOLDER, HIGHLIGHT_FOLDER]:
-    os.makedirs(folder, exist_ok=True)
+for d in [UPLOAD_DIR, PROC_DIR, CALIB_DIR, HL_DIR]:
+    os.makedirs(d, exist_ok=True)
 
+# ── SQLite init ──────────────────────────────────────────────────────────────────
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as db:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT    UNIQUE NOT NULL,
+            email        TEXT    UNIQUE NOT NULL,
+            password_hash TEXT   NOT NULL,
+            created_at   TEXT    DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS analysis_history (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            session_id   TEXT,
+            date         TEXT,
+            player_name  TEXT,
+            position     TEXT,
+            stats_json   TEXT,
+            target_track_id INTEGER,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """)
+
+init_db()
+
+# ── In-memory session stores ─────────────────────────────────────────────────────
 analysis_sessions = {}
 processing_progress = {}
-analysis_results = {}   # stores completed results per session_id
+analysis_results = {}
 
-
-# --- Static file routes ---
+# ── Static file routes ───────────────────────────────────────────────────────────
 @app.route('/data/processed/<path:filename>')
-def serve_processed(filename):
-    return send_from_directory(PROCESSED_FOLDER, filename)
+def serve_processed(filename): return send_from_directory(PROC_DIR, filename)
 
 @app.route('/static/highlights/<path:filename>')
-def serve_highlights(filename):
-    return send_from_directory(HIGHLIGHT_FOLDER, filename)
+def serve_highlights(filename): return send_from_directory(HL_DIR, filename)
 
 @app.route('/static/calibration/<path:filename>')
-def serve_calibration(filename):
-    return send_from_directory(CALIBRATION_FOLDER, filename)
+def serve_calibration(filename): return send_from_directory(CALIB_DIR, filename)
 
+# ── Auth helpers ─────────────────────────────────────────────────────────────────
+def current_user():
+    uid = session.get('user_id')
+    if not uid: return None
+    with get_db() as db:
+        row = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return dict(row) if row else None
 
-# --- Utilities ---
-def update_history(record):
-    history = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                history = json.load(f)
-        except Exception:
-            history = []
-    history.append(record)
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(history, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
-    return history
+# ── Auth routes ──────────────────────────────────────────────────────────────────
+@app.route('/api/me')
+def api_me():
+    u = current_user()
+    if not u: return jsonify({"logged_in": False}), 200
+    return jsonify({"logged_in": True, "id": u['id'], "username": u['username'], "email": u['email']})
 
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    email    = (data.get('email')    or '').strip()
+    password = (data.get('password') or '').strip()
+    if not username or not email or not password:
+        return jsonify({"error": "모든 필드를 입력해 주세요."}), 400
+    try:
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO users (username, email, password_hash) VALUES (?,?,?)",
+                (username, email, generate_password_hash(password))
+            )
+        with get_db() as db:
+            u = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        session['user_id'] = u['id']
+        return jsonify({"ok": True, "username": username})
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "이미 사용 중인 이메일 또는 닉네임입니다."}), 409
 
-# --- Routes ---
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.json or {}
+    email    = (data.get('email')    or '').strip()
+    password = (data.get('password') or '').strip()
+    with get_db() as db:
+        u = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    if not u or not check_password_hash(u['password_hash'], password):
+        return jsonify({"error": "이메일 또는 비밀번호가 틀렸습니다."}), 401
+    session['user_id'] = u['id']
+    return jsonify({"ok": True, "username": u['username']})
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+# ── Main routes ──────────────────────────────────────────────────────────────────
 @app.route('/')
-def index():
-    return render_template('index.html')
+def index(): return render_template('index.html')
 
 @app.route('/history')
 def get_history():
-    if os.path.exists(HISTORY_FILE):
+    u = current_user()
+    if not u: return jsonify([])
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM analysis_history WHERE user_id=? ORDER BY id DESC LIMIT 50",
+            (u['id'],)
+        ).fetchall()
+    result = []
+    for r in rows:
         try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                return jsonify(json.load(f))
+            stats = json.loads(r['stats_json'])
         except Exception:
-            pass
-    return jsonify([])
+            stats = {}
+        result.append({"date": r['date'], "player_name": r['player_name'],
+                        "stats": stats, "target_id": r['target_track_id']})
+    return jsonify(result)
 
 @app.route('/progress/<session_id>')
 def get_progress(session_id):
@@ -85,133 +158,116 @@ def get_progress(session_id):
 
 @app.route('/results/<session_id>')
 def get_results(session_id):
-    result = analysis_results.get(session_id)
-    if result:
-        return jsonify(result)
+    res = analysis_results.get(session_id)
+    if res: return jsonify(res)
     prog = processing_progress.get(session_id, {})
     if prog.get('status') == 'error':
-        return jsonify({"error": prog.get('message', '분석 중 오류가 발생했습니다.')}), 500
+        return jsonify({"error": prog.get('message', '분석 오류')}), 500
     return jsonify({"status": "processing"}), 202
 
 @app.route('/upload', methods=['POST'])
 def upload_video():
     if 'video' not in request.files:
         return jsonify({"error": "영상 파일이 없습니다."}), 400
-
     video = request.files['video']
-    session_id = str(uuid.uuid4())
-    video_path = os.path.join(UPLOAD_FOLDER, f"{session_id}.mp4")
-    video.save(video_path)
+    sid   = str(uuid.uuid4())
+    vpath = os.path.join(UPLOAD_DIR, f"{sid}.mp4")
+    video.save(vpath)
 
-    processing_progress[session_id] = {"percent": 0, "status": "initializing"}
+    processing_progress[sid] = {"percent": 0, "status": "initializing"}
 
-    cap = cv2.VideoCapture(video_path)
-    ret, frame = cap.read()
-    if ret:
-        cv2.imwrite(os.path.join(CALIBRATION_FOLDER, f"{session_id}_first.jpg"), frame)
+    cap = cv2.VideoCapture(vpath)
+    ok, frame = cap.read()
+    if ok:
+        cv2.imwrite(os.path.join(CALIB_DIR, f"{sid}_first.jpg"), frame)
     cap.release()
 
-    detector = FootballDetector('models/yolov8s.pt')
-    detections = detector.detect_players_for_selection(video_path)
+    det  = FootballDetector('models/yolov8s.pt')
+    dets = det.detect_players_for_selection(vpath)
 
-    position = request.form.get('position', 'ST')
-    player_name = request.form.get('player_name', 'PLAYER')
-
-    analysis_sessions[session_id] = {
-        "video_path": video_path,
-        "position": position,
-        "player_name": player_name,
+    analysis_sessions[sid] = {
+        "video_path":  vpath,
+        "position":    request.form.get('position', 'ST'),
+        "player_name": request.form.get('player_name', 'PLAYER'),
+        "user_id":     session.get('user_id'),
     }
     return jsonify({
-        "session_id": session_id,
-        "frame_url": f"/static/calibration/{session_id}_first.jpg",
-        "players": detections,
+        "session_id": sid,
+        "frame_url":  f"/static/calibration/{sid}_first.jpg",
+        "players":    dets,
     })
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    data = request.json
-    session_id = data.get('session_id')
-    calibration_points = data.get('points')
-    target_player_id = data.get('target_id')
-    session = analysis_sessions.get(session_id)
-    if not session:
-        return jsonify({"error": "세션이 존재하지 않습니다."}), 404
+    data   = request.json
+    sid    = data.get('session_id')
+    pts    = data.get('points')
+    target = data.get('target_id')
+    sess   = analysis_sessions.get(sid)
+    if not sess: return jsonify({"error": "세션이 없습니다."}), 404
 
-    def run_analysis():
+    def run():
         try:
-            def progress_cb(p):
-                processing_progress[session_id] = {"percent": int(p), "status": "analyzing"}
+            def cb(p): processing_progress[sid] = {"percent": int(p), "status": "analyzing"}
 
-            detector = FootballDetector('models/yolov8s.pt')
-            output_video = os.path.join(PROCESSED_FOLDER, f"{session_id}_analyzed.mp4")
-            results = detector.process_video_v2(
-                session['video_path'], output_video,
-                calibration_points, target_player_id,
-                progress_callback=progress_cb
-            )
+            det = FootballDetector('models/yolov8s.pt')
+            out_v = os.path.join(PROC_DIR, f"{sid}_analyzed.mp4")
+            res   = det.process_video_v2(sess['video_path'], out_v, pts, target, progress_callback=cb)
 
-            player_pos = session.get("position", "ST")
-            player_name = session.get("player_name", "PLAYER")
-
-            # Get FPS for accurate stats
-            cap = cv2.VideoCapture(session['video_path'])
+            cap = cv2.VideoCapture(sess['video_path'])
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
             cap.release()
 
-            stats = detector.analyzer.calculate_individual_stats(
-                detector.player_tracks, results['target_track_id'],
-                position=player_pos, fps=fps
-            )
+            stats      = det.analyzer.calculate_individual_stats(
+                            det.player_tracks, res['target_track_id'],
+                            position=sess.get('position','ST'), fps=fps)
+            highlights, events = det.analyzer.extract_combined_highlights(
+                            sess['video_path'], det.player_tracks,
+                            res['target_track_id'], fps=fps)
+            master_url = det.analyzer.generate_master_sizzle_reel(
+                            sess['video_path'], events, det.player_tracks,
+                            res['target_track_id'], sid,
+                            player_name=sess.get('player_name','PLAYER'))
+            heatmap_url= det.analyzer.generate_pitch_heatmap(
+                            det.player_tracks, res['target_track_id'], sid)
+            ai_comment = det.analyzer.generate_ai_comment(stats)
 
-            highlights, events = detector.analyzer.extract_combined_highlights(
-                session['video_path'], detector.player_tracks,
-                results['target_track_id'], fps=fps
-            )
-
-            master_reel_url = detector.analyzer.generate_master_sizzle_reel(
-                session['video_path'], events, detector.player_tracks,
-                results['target_track_id'], session_id, player_name=player_name
-            )
-
-            heatmap_url = detector.analyzer.generate_pitch_heatmap(
-                detector.player_tracks, results['target_track_id'], session_id
-            )
-            ai_comment = detector.analyzer.generate_ai_comment(stats)
-
-            if not master_reel_url:
-                processing_progress[session_id] = {
+            if not master_url:
+                processing_progress[sid] = {
                     "status": "error",
-                    "message": "하이라이트 장면이 감지되지 않았습니다. 다른 선수를 선택하거나 더 긴 영상을 시도해 주세요."
+                    "message": "하이라이트 감지 실패. 더 긴 영상이나 다른 선수를 선택해 주세요."
                 }
                 return
 
-            update_history({
-                "session_id": session_id,
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "stats": stats,
-                "target_id": results['target_track_id'],
-                "player_name": player_name,
-            })
+            # Save to DB
+            uid = sess.get('user_id')
+            if uid:
+                with get_db() as db:
+                    db.execute(
+                        "INSERT INTO analysis_history (user_id,session_id,date,player_name,position,stats_json,target_track_id) VALUES (?,?,?,?,?,?,?)",
+                        (uid, sid, datetime.now().strftime("%Y-%m-%d %H:%M"),
+                         sess.get('player_name',''), sess.get('position','ST'),
+                         json.dumps(stats, cls=NumpyEncoder),
+                         res['target_track_id'])
+                    )
 
-            analysis_results[session_id] = {
-                "status": "success",
-                "video_url": master_reel_url,
-                "stats": stats,
-                "highlights": highlights,
+            analysis_results[sid] = {
+                "status":      "success",
+                "video_url":   master_url,
+                "stats":       stats,
+                "highlights":  highlights,
                 "heatmap_url": heatmap_url,
-                "ai_comment": ai_comment,
+                "ai_comment":  ai_comment,
             }
-            processing_progress[session_id] = {"percent": 100, "status": "completed"}
+            processing_progress[sid] = {"percent": 100, "status": "completed"}
 
         except Exception as e:
             import traceback; traceback.print_exc()
-            processing_progress[session_id] = {"status": "error", "message": str(e)}
+            processing_progress[sid] = {"status": "error", "message": str(e)}
 
-    processing_progress[session_id] = {"percent": 0, "status": "analyzing"}
-    thread = threading.Thread(target=run_analysis, daemon=True)
-    thread.start()
-    return jsonify({"status": "started", "session_id": session_id})
+    processing_progress[sid] = {"percent": 0, "status": "analyzing"}
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "started", "session_id": sid})
 
 
 if __name__ == '__main__':

@@ -1,606 +1,529 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TAD AI | Football Analysis</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
-    <style>
-        :root {
-            --primary: #ff1a1a;
-            --secondary: #080808;
-            --accent: #ffd700;
-            --silver: #e0e0e0;
-            --glass: rgba(255,255,255,0.04);
-            --border: rgba(255,255,255,0.1);
-        }
-        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
-        body {
-            background: var(--secondary);
-            color:#fff;
-            min-height:100vh;
-            background-image: radial-gradient(circle at 50% 50%, #1a0000 0%, #080808 100%);
-            overflow-x: hidden;
-        }
-        .container { max-width:1500px; margin:0 auto; padding:40px 20px; }
-        header { display:flex; justify-content:space-between; align-items:center; margin-bottom:50px; }
-        .logo {
-            font-size:2.2rem; font-weight:900; letter-spacing:-2px;
-            background:linear-gradient(to right,#ff1a1a,#ff7b00);
-            -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
-            text-transform:uppercase;
-        }
-        .hidden { display:none !important; }
-        .analysis-step {
-            background:rgba(20,20,20,0.6); backdrop-filter:blur(40px);
-            border:1px solid var(--border); border-radius:40px;
-            padding:80px 40px; text-align:center;
-            box-shadow:0 40px 100px rgba(0,0,0,0.8);
-            animation:slideUp 0.8s cubic-bezier(0.2,0.8,0.2,1);
-        }
-        @keyframes slideUp { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:translateY(0)} }
-
-        /* FIFA Card */
-        .fifa-card {
-            width:360px; height:520px;
-            background:linear-gradient(135deg,#4b0000 0%,#8b0000 50%,#b22222 100%);
-            border-radius:20px; position:relative; color:#fff; padding:30px;
-            box-shadow:0 40px 80px rgba(0,0,0,0.6),inset 0 0 100px rgba(0,0,0,0.5);
-            transition:transform 0.4s ease; margin:0 auto;
-            border:2px solid rgba(255,215,0,0.2); overflow:hidden;
-        }
-        .fifa-card::before {
-            content:""; position:absolute; top:0;left:0;width:100%;height:100%;
-            background:url('https://www.transparenttextures.com/patterns/hexellence.png');
-            opacity:0.15; mix-blend-mode:overlay;
-        }
-        .card-stats {
-            position:absolute; left:30px; top:100px;
-            font-size:1.6rem; font-weight:900; line-height:1.1; z-index:2;
-            text-shadow:0 5px 15px rgba(0,0,0,0.5);
-        }
-        .card-stats div { margin-bottom:8px; color:var(--silver); }
-        .card-stats div span { color:var(--accent); }
-        .player-img-container {
-            position:absolute; top:40px; right:-30px;
-            width:280px; height:380px; z-index:1;
-            mask-image:linear-gradient(to bottom,black 85%,transparent 100%);
-        }
-        .player-img { width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 20px 40px rgba(0,0,0,0.6)); }
-        .player-info { position:absolute; bottom:45px; width:100%; left:0; text-align:center; z-index:3; }
-        .player-name { font-size:2.2rem; font-weight:900; text-transform:uppercase; letter-spacing:-1.5px; color:#fff; }
-        .player-meta { font-size:1rem; font-weight:700; color:var(--accent); margin-top:5px; }
-
-        /* Dashboard */
-        .dashboard-grid { display:grid; grid-template-columns:400px 1fr; gap:40px; }
-        .section-card {
-            background:var(--glass); border-radius:32px; padding:30px;
-            border:1px solid var(--border); margin-bottom:30px;
-        }
-        .heatmap-container {
-            width:100%; height:250px;
-            background:url('https://img.freepik.com/free-vector/top-view-soccer-pitch_23-2148187802.jpg') center/cover;
-            border-radius:16px; overflow:hidden; position:relative; border:1px solid var(--border);
-        }
-        .heatmap-img { width:100%; height:100%; object-fit:contain; mix-blend-mode:screen; }
-        .ai-comment-box {
-            background:linear-gradient(45deg,rgba(255,26,26,0.1),rgba(0,0,0,0));
-            border-left:4px solid var(--primary); padding:20px;
-            border-radius:0 16px 16px 0; font-size:1.05rem; line-height:1.6; margin-top:20px;
-        }
-        .video-reel { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:25px; }
-        .clip-card {
-            background:#111; border-radius:24px; overflow:hidden;
-            border:1px solid var(--border); transition:transform 0.3s ease; cursor:pointer;
-        }
-        .clip-card:hover { transform:translateY(-8px); border-color:var(--primary); }
-
-        /* Stat badges */
-        .stat-badge {
-            display:inline-flex; align-items:center; gap:8px;
-            background:rgba(255,255,255,0.06); border:1px solid var(--border);
-            border-radius:12px; padding:10px 18px; font-size:0.95rem; font-weight:700;
-        }
-        .stat-badge .val { color:var(--accent); font-size:1.2rem; }
-
-        .btn {
-            background:linear-gradient(45deg,#ff1a1a,#dc143c);
-            border:none; padding:20px 50px; border-radius:100px;
-            color:#fff; font-weight:800; cursor:pointer; transition:all 0.4s ease;
-            font-size:1.1rem; text-transform:uppercase;
-        }
-        .btn:hover { transform:scale(1.05); box-shadow:0 20px 50px rgba(255,26,26,0.4); }
-        .btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
-
-        .input-field {
-            background:#151515; border:1px solid var(--border); padding:18px;
-            border-radius:16px; color:#fff; width:100%; font-size:1rem; outline:none; transition:all 0.3s;
-        }
-        .input-field:focus { border-color:var(--primary); background:#202020; }
-
-        /* Progress overlay */
-        #analysisOverlay {
-            position:fixed; top:0;left:0;width:100%;height:100%;
-            background:rgba(0,0,0,0.98); z-index:10000;
-            display:flex; flex-direction:column; justify-content:center; align-items:center;
-            backdrop-filter:blur(20px); opacity:0; pointer-events:none; transition:opacity 0.5s ease;
-        }
-        #analysisOverlay.active { opacity:1; pointer-events:auto; }
-        .progress-bar-container {
-            width:400px; height:8px; background:rgba(255,255,255,0.05);
-            border-radius:10px; overflow:hidden; margin-bottom:20px; border:1px solid var(--border);
-        }
-        #progress-fill { width:0%; height:100%; background:linear-gradient(to right,#ff1a1a,#ff7b00); transition:width 0.5s ease; }
-
-        /* Loader */
-        .loader-overlay {
-            position:fixed; top:0;left:0;width:100%;height:100%;
-            background:#080808; z-index:20000;
-            display:flex; justify-content:center; align-items:center;
-            opacity:0; pointer-events:none; transition:opacity 0.8s ease;
-        }
-        .loader-overlay.active { opacity:1; pointer-events:auto; }
-
-        @media (max-width:1100px) { .dashboard-grid { grid-template-columns:1fr; } }
-        @media (max-width:600px) {
-            .analysis-step { padding:40px 20px; }
-            .fifa-card { width:300px; height:440px; }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>TAD AI | Football Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<style>
+:root{--red:#ff1a1a;--bg:#080808;--gold:#ffd700;--glass:rgba(255,255,255,0.04);--border:rgba(255,255,255,0.1);}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Outfit',sans-serif;}
+body{background:var(--bg);color:#fff;min-height:100vh;background-image:radial-gradient(circle at 50% 30%,#1a0000,#080808 70%);overflow-x:hidden;}
+.wrap{max-width:1500px;margin:0 auto;padding:40px 20px;}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:50px;}
+.logo{font-size:2.2rem;font-weight:900;letter-spacing:-2px;background:linear-gradient(to right,#ff1a1a,#ff7b00);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-transform:uppercase;}
+.hidden{display:none!important;}
+.step{background:rgba(20,20,20,.65);backdrop-filter:blur(40px);border:1px solid var(--border);border-radius:40px;padding:70px 40px;text-align:center;box-shadow:0 40px 100px rgba(0,0,0,.8);animation:up .7s cubic-bezier(.2,.8,.2,1);}
+@keyframes up{from{opacity:0;transform:translateY(36px)}to{opacity:1;transform:translateY(0)}}
+/* inputs */
+.inp{background:#151515;border:1px solid var(--border);padding:16px 18px;border-radius:14px;color:#fff;width:100%;font-size:1rem;outline:none;transition:.3s;}
+.inp:focus{border-color:var(--red);background:#1e1e1e;}
+.btn{background:linear-gradient(45deg,#ff1a1a,#dc143c);border:none;padding:18px 48px;border-radius:100px;color:#fff;font-weight:800;cursor:pointer;transition:.3s;font-size:1rem;text-transform:uppercase;}
+.btn:hover{transform:scale(1.04);box-shadow:0 18px 45px rgba(255,26,26,.4);}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;}
+.btn-ghost{background:transparent;border:1px solid var(--border);padding:14px 36px;border-radius:100px;color:#aaa;font-weight:700;cursor:pointer;transition:.3s;font-size:.9rem;}
+.btn-ghost:hover{border-color:var(--red);color:#fff;}
+/* FIFA card */
+.fifa-card{width:340px;height:500px;background:linear-gradient(135deg,#4b0000,#8b0000 50%,#b22222);border-radius:20px;position:relative;color:#fff;padding:28px;box-shadow:0 40px 80px rgba(0,0,0,.6),inset 0 0 100px rgba(0,0,0,.5);margin:0 auto;border:2px solid rgba(255,215,0,.2);overflow:hidden;}
+.fifa-card::before{content:"";position:absolute;inset:0;background:url('https://www.transparenttextures.com/patterns/hexellence.png');opacity:.15;mix-blend-mode:overlay;}
+.card-stats{position:absolute;left:28px;top:95px;font-size:1.55rem;font-weight:900;line-height:1.1;z-index:2;text-shadow:0 5px 15px rgba(0,0,0,.5);}
+.card-stats div{margin-bottom:7px;color:#ddd;}
+.card-stats div span{color:var(--gold);}
+.p-img-wrap{position:absolute;top:38px;right:-28px;width:270px;height:370px;z-index:1;mask-image:linear-gradient(to bottom,black 85%,transparent);}
+.p-img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 20px 40px rgba(0,0,0,.6));}
+.p-info{position:absolute;bottom:40px;width:100%;left:0;text-align:center;z-index:3;}
+.p-name{font-size:2rem;font-weight:900;text-transform:uppercase;letter-spacing:-1px;}
+.p-meta{font-size:.9rem;font-weight:700;color:var(--gold);margin-top:4px;}
+/* dashboard */
+.dash-grid{display:grid;grid-template-columns:380px 1fr;gap:40px;}
+.card-box{background:var(--glass);border-radius:28px;padding:26px;border:1px solid var(--border);margin-bottom:24px;}
+.heatmap-wrap{width:100%;height:240px;border-radius:14px;overflow:hidden;border:1px solid var(--border);}
+.heatmap-img{width:100%;height:100%;object-fit:cover;}
+.stat-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;padding:9px 16px;font-size:.9rem;font-weight:700;}
+.stat-badge .v{color:var(--gold);font-size:1.1rem;}
+.reel{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px;}
+.clip-card{background:#111;border-radius:20px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:.3s;}
+.clip-card:hover{transform:translateY(-6px);border-color:var(--red);}
+.clip-tag{font-size:.75rem;font-weight:900;padding:3px 10px;border-radius:20px;display:inline-block;}
+.tag-good{background:rgba(74,222,128,.15);color:#4ade80;}
+.tag-bad{background:rgba(248,113,113,.15);color:#f87171;}
+.tag-neutral{background:rgba(255,215,0,.15);color:var(--gold);}
+/* progress overlay */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.97);z-index:10000;display:flex;flex-direction:column;justify-content:center;align-items:center;backdrop-filter:blur(20px);opacity:0;pointer-events:none;transition:opacity .5s;}
+#overlay.on{opacity:1;pointer-events:auto;}
+.pbar-wrap{width:380px;height:8px;background:rgba(255,255,255,.05);border-radius:10px;overflow:hidden;margin-bottom:18px;border:1px solid var(--border);}
+#pbar{width:0%;height:100%;background:linear-gradient(to right,#ff1a1a,#ff7b00);transition:width .5s;}
+/* loader */
+#loader{position:fixed;inset:0;background:#080808;z-index:20000;display:flex;justify-content:center;align-items:center;opacity:0;pointer-events:none;transition:opacity .8s;}
+#loader.on{opacity:1;pointer-events:auto;}
+/* auth modal */
+#auth-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(16px);}
+.auth-box{background:#111;border:1px solid var(--border);border-radius:32px;padding:50px 40px;width:420px;max-width:95vw;text-align:center;}
+.tab-btn{background:none;border:none;color:#666;font-size:1rem;font-weight:700;cursor:pointer;padding:10px 24px;border-radius:100px;transition:.2s;}
+.tab-btn.active{background:rgba(255,26,26,.15);color:var(--red);}
+@media(max-width:1100px){.dash-grid{grid-template-columns:1fr;}}
+@media(max-width:600px){.step{padding:36px 18px;}.fifa-card{width:290px;height:430px;}}
+</style>
 </head>
 <body>
 
-<!-- Boot loader -->
-<div id="initialLoader" class="loader-overlay active">
-    <div style="text-align:center">
-        <h1 style="font-size:4rem;font-weight:900;background:linear-gradient(to right,#ff1a1a,#ffd700);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">TAD AI</h1>
-        <p style="letter-spacing:5px;opacity:0.5;margin-top:10px;">AI 엔진 기동 중...</p>
+<!-- Boot -->
+<div id="loader" class="on"><div style="text-align:center"><h1 style="font-size:3.8rem;font-weight:900;background:linear-gradient(to right,#ff1a1a,#ffd700);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">TAD AI</h1><p style="opacity:.5;letter-spacing:4px;margin-top:10px">Loading...</p></div></div>
+
+<!-- Auth Modal -->
+<div id="auth-modal">
+  <div class="auth-box">
+    <h2 style="font-size:2rem;font-weight:900;margin-bottom:6px">TAD AI</h2>
+    <p style="opacity:.5;margin-bottom:28px;font-size:.9rem">AI 축구 분석 플랫폼</p>
+    <div style="margin-bottom:28px">
+      <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">로그인</button>
+      <button class="tab-btn" id="tab-register" onclick="switchTab('register')">회원가입</button>
     </div>
+    <!-- Login -->
+    <div id="form-login">
+      <input id="l-email" class="inp" type="email" placeholder="이메일" style="margin-bottom:12px">
+      <input id="l-pass"  class="inp" type="password" placeholder="비밀번호" style="margin-bottom:20px">
+      <div id="l-err" style="color:#f87171;font-size:.85rem;margin-bottom:12px;min-height:18px"></div>
+      <button class="btn" style="width:100%" onclick="doLogin()">로그인</button>
+    </div>
+    <!-- Register -->
+    <div id="form-register" class="hidden">
+      <input id="r-name"  class="inp" type="text"     placeholder="닉네임" style="margin-bottom:12px">
+      <input id="r-email" class="inp" type="email"    placeholder="이메일" style="margin-bottom:12px">
+      <input id="r-pass"  class="inp" type="password" placeholder="비밀번호 (6자 이상)" style="margin-bottom:20px">
+      <div id="r-err" style="color:#f87171;font-size:.85rem;margin-bottom:12px;min-height:18px"></div>
+      <button class="btn" style="width:100%" onclick="doRegister()">가입하기</button>
+    </div>
+  </div>
 </div>
 
-<div class="container">
-    <header>
-        <div class="logo">TAD AI</div>
-        <div id="header-stats" class="hidden">
-            <span id="session-tag" style="color:var(--primary);font-weight:900;letter-spacing:2px;">● LIVE ANALYSIS</span>
+<div class="wrap">
+  <header>
+    <div class="logo">TAD AI</div>
+    <div id="hdr-user" style="display:flex;align-items:center;gap:16px">
+      <span id="hdr-name" style="font-weight:700;color:var(--gold)"></span>
+      <button class="btn-ghost" onclick="doLogout()">로그아웃</button>
+    </div>
+  </header>
+
+  <!-- Step 0: Profile -->
+  <main id="step-profile" class="step hidden">
+    <h1 style="font-size:3.2rem;font-weight:900;margin-bottom:8px">Player Profile</h1>
+    <p style="opacity:.6;margin-bottom:44px">선수 정보를 입력하면 FIFA 카드에 반영됩니다.</p>
+    <div style="max-width:760px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">선수 이름</label><input id="pf-name" class="inp" placeholder="KIM KOREA"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">팀명</label><input id="pf-team" class="inp" placeholder="RED DEVILS FC"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">생년월일</label><input id="pf-birth" class="inp" type="date"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">주 발</label>
+        <select id="pf-foot" class="inp"><option value="Right">RIGHT FOOT</option><option value="Left">LEFT FOOT</option><option value="Both">BOTH FEET</option></select></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">포지션</label><input id="pf-pos" class="inp" placeholder="ST / CM / CB / GK"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">프로필 사진</label><input id="pf-img" class="inp" type="file" accept="image/*" style="padding:12px"></div>
+    </div>
+    <button class="btn" style="margin-top:44px" onclick="goUpload()">다음 단계 →</button>
+  </main>
+
+  <!-- Step 1: Upload -->
+  <main id="step-upload" class="step hidden">
+    <h1 style="font-size:3.2rem;font-weight:900;margin-bottom:18px">VIDEO UPLOAD</h1>
+    <p style="opacity:.6;margin-bottom:44px">분석할 경기 영상을 선택하세요.</p>
+    <input type="file" id="vid-input" class="hidden" accept="video/*" onchange="handleUpload()">
+    <button class="btn" onclick="document.getElementById('vid-input').click()">영상 파일 선택</button>
+  </main>
+
+  <!-- Step 2: Calibrate -->
+  <main id="step-calib" class="step hidden">
+    <h1 style="font-size:2.8rem;font-weight:900;margin-bottom:16px">CALIBRATION</h1>
+    <p style="opacity:.7;margin-bottom:10px"><strong style="color:var(--red)">① 경기장 모서리 4곳</strong>을 순서대로 클릭 (좌상→우상→우하→좌하)</p>
+    <p style="opacity:.7;margin-bottom:20px"><strong style="color:var(--gold)">② 분석할 선수 1명</strong>을 마지막으로 클릭</p>
+    <div style="position:relative;display:inline-block;border-radius:16px;overflow:hidden;border:2px solid var(--border)">
+      <canvas id="c-canvas"></canvas>
+    </div>
+    <div id="c-status" style="margin-top:16px;opacity:.7">모서리 <span id="c-cnt">0</span>/4</div>
+    <div style="margin-top:28px"><button class="btn" id="c-btn" disabled onclick="startAnalysis()">AI 정밀 분석 시작</button></div>
+  </main>
+
+  <!-- Step 3: Dashboard -->
+  <main id="step-dash" class="hidden">
+    <div class="dash-grid">
+      <!-- Sidebar -->
+      <div>
+        <div id="card-wrap">
+          <div class="fifa-card">
+            <div class="card-stats">
+              <div>PAC <span id="s-pac">—</span></div>
+              <div>DRI <span id="s-dri">—</span></div>
+              <div>SHO <span id="s-sho">—</span></div>
+              <div>PAS <span id="s-pas">—</span></div>
+              <div>PHY <span id="s-phy">—</span></div>
+            </div>
+            <div class="p-img-wrap"><img src="https://images.unsplash.com/photo-1543351611-58f69d7c1781?auto=format" id="card-img" class="p-img"></div>
+            <div class="p-info">
+              <div class="p-name" id="d-name">PLAYER</div>
+              <div class="p-meta"><span id="d-pos">ST</span> | <span id="d-foot">RIGHT</span> | <span id="d-birth">—</span></div>
+              <div id="d-team" style="font-size:.85rem;font-weight:800;color:var(--gold);margin-top:6px">TEAM</div>
+            </div>
+          </div>
         </div>
-    </header>
 
-    <!-- Step 0: Profile -->
-    <main id="step-profile" class="analysis-step">
-        <h1 style="font-size:3.5rem;margin-bottom:10px;font-weight:900;text-transform:uppercase;">Player Profile</h1>
-        <p style="opacity:0.6;margin-bottom:50px;font-size:1.2rem;">선수 정보를 입력하면 FIFA 카드에 반영됩니다.</p>
-        <div style="max-width:800px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:30px;">
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">선수 이름</label>
-                <input type="text" id="prof-name" class="input-field" placeholder="KIM KOREA">
-            </div>
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">팀명</label>
-                <input type="text" id="prof-team" class="input-field" placeholder="RED DEVILS FC">
-            </div>
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">생년월일</label>
-                <input type="date" id="prof-birth" class="input-field">
-            </div>
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">주 발</label>
-                <select id="prof-foot" class="input-field">
-                    <option value="Right">RIGHT FOOT</option>
-                    <option value="Left">LEFT FOOT</option>
-                    <option value="Both">BOTH FEET</option>
-                </select>
-            </div>
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">포지션</label>
-                <input type="text" id="prof-pos" class="input-field" placeholder="ST / CM / CB">
-            </div>
-            <div style="text-align:left">
-                <label style="display:block;margin-bottom:10px;font-weight:800;color:var(--primary)">프로필 사진</label>
-                <input type="file" id="prof-img-input" class="input-field" accept="image/*" style="padding:14px">
-            </div>
+        <!-- Real stats -->
+        <div class="card-box" style="margin-top:22px">
+          <h3 style="color:var(--red);margin-bottom:14px;font-size:.9rem;text-transform:uppercase">Real Performance Data</h3>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            <div class="stat-badge">🏃 이동거리 <span class="v" id="d-dist">—</span> km</div>
+            <div class="stat-badge">⚡ 최고속도 <span class="v" id="d-spd">—</span> km/h</div>
+            <div class="stat-badge">💨 스프린트 <span class="v" id="d-spr">—</span> 회</div>
+          </div>
         </div>
-        <button class="btn" style="margin-top:50px" onclick="goToUpload()">다음 단계 →</button>
-    </main>
 
-    <!-- Step 1: Upload -->
-    <main id="step-upload" class="analysis-step hidden">
-        <h1 style="font-size:3.5rem;margin-bottom:20px;font-weight:900">VIDEO UPLOAD</h1>
-        <p style="opacity:0.6;margin-bottom:50px">분석할 경기 영상을 선택하세요. AI가 모든 활약을 포착합니다.</p>
-        <input type="file" id="videoInput" class="hidden" accept="video/*" onchange="handleUpload()">
-        <button class="btn" onclick="document.getElementById('videoInput').click()">영상 파일 선택</button>
-    </main>
+        <button class="btn" onclick="dlCard()" style="width:100%;border-radius:14px;margin-bottom:20px">퍼포먼스 카드 저장</button>
 
-    <!-- Step 2: Calibrate & Select -->
-    <main id="step-calibrate" class="analysis-step hidden">
-        <h1 style="font-size:3rem;margin-bottom:20px;font-weight:900">CALIBRATION</h1>
-        <p style="opacity:0.7;margin-bottom:12px">
-            <strong style="color:var(--primary)">① 경기장 모서리 4곳</strong>을 순서대로 클릭하고,<br>
-            <strong style="color:var(--accent)">② 분석할 선수</strong>를 마지막으로 클릭하세요.
-        </p>
-        <p id="calib-hint" style="opacity:0.5;font-size:0.9rem;margin-bottom:20px">좌상 → 우상 → 우하 → 좌하 → 선수 순서 권장</p>
-        <div style="position:relative;display:inline-block;border-radius:20px;overflow:hidden;border:2px solid var(--border)">
-            <canvas id="calibrationCanvas"></canvas>
+        <!-- Heatmap -->
+        <div class="card-box">
+          <h3 style="color:var(--red);margin-bottom:16px;font-size:.9rem;text-transform:uppercase">Pitch Heatmap</h3>
+          <div class="heatmap-wrap"><img src="" id="hm-img" class="heatmap-img"></div>
+          <p style="margin-top:10px;font-size:.82rem;opacity:.55">밝을수록 많이 활동한 구역</p>
         </div>
-        <div id="calib-status" style="margin-top:20px;font-size:1rem;opacity:0.7">경기장 모서리 <span id="calib-count">0</span>/4 클릭됨</div>
-        <div style="margin-top:30px">
-            <button class="btn" id="startBtn" disabled onclick="startDeepAnalysis()">AI 정밀 분석 시작</button>
+
+        <!-- Growth chart -->
+        <div class="card-box">
+          <h3 style="color:var(--red);margin-bottom:16px;font-size:.9rem;text-transform:uppercase">Growth Progress</h3>
+          <canvas id="growth-chart" style="max-height:180px"></canvas>
         </div>
-    </main>
+      </div>
 
-    <!-- Step 3: Dashboard -->
-    <main id="step-dashboard" class="hidden">
-        <div class="dashboard-grid">
-            <!-- Sidebar -->
-            <div>
-                <div id="card-to-save">
-                    <div class="fifa-card">
-                        <div class="card-stats">
-                            <div>PAC <span id="stat-PAC">—</span></div>
-                            <div>DRI <span id="stat-DRI">—</span></div>
-                            <div>SHO <span id="stat-SHO">—</span></div>
-                            <div>PAS <span id="stat-PAS">—</span></div>
-                            <div>PHY <span id="stat-PHY">—</span></div>
-                        </div>
-                        <div class="player-img-container">
-                            <img src="https://images.unsplash.com/photo-1543351611-58f69d7c1781?auto=format" id="card-player-img" class="player-img">
-                        </div>
-                        <div class="player-info">
-                            <div class="player-name" id="playerNameDisplay">PLAYER</div>
-                            <div class="player-meta">
-                                <span id="playerPosDisplay">ST</span> |
-                                <span id="playerFootDisplay">RIGHT</span> |
-                                <span id="playerBirthDisplay">—</span>
-                            </div>
-                            <div id="playerTeamDisplay" style="font-size:0.9rem;font-weight:800;color:var(--accent);margin-top:8px">TEAM</div>
-                        </div>
-                    </div>
-                </div>
+      <!-- Main -->
+      <div>
+        <!-- Master reel -->
+        <div class="card-box" style="padding:0;overflow:hidden;border:2px solid var(--red)">
+          <video id="main-vid" controls style="width:100%;display:block"></video>
+        </div>
 
-                <!-- Real stats badges -->
-                <div class="section-card" style="margin-top:25px">
-                    <h3 style="color:var(--primary);margin-bottom:18px;text-transform:uppercase;font-size:0.95rem">Real Performance Data</h3>
-                    <div style="display:flex;flex-wrap:wrap;gap:12px">
-                        <div class="stat-badge">🏃 이동거리 <span class="val" id="stat-dist">—</span> km</div>
-                        <div class="stat-badge">⚡ 최고속도 <span class="val" id="stat-speed">—</span> km/h</div>
-                        <div class="stat-badge">💨 스프린트 <span class="val" id="stat-sprints">—</span> 회</div>
-                    </div>
-                </div>
+        <!-- AI Comment -->
+        <div class="card-box">
+          <h2 style="color:var(--red);font-weight:900;margin-bottom:10px">AI SCOUTING REPORT</h2>
+          <div id="ai-box" style="background:linear-gradient(45deg,rgba(255,26,26,.08),transparent);border-left:4px solid var(--red);padding:18px;border-radius:0 14px 14px 0;font-size:1rem;line-height:1.65"></div>
+        </div>
 
-                <button class="btn" onclick="downloadCard()" style="width:100%;margin-top:5px;border-radius:16px">퍼포먼스 리포트 저장</button>
-
-                <!-- Heatmap -->
-                <div class="section-card" style="margin-top:25px">
-                    <h3 style="color:var(--primary);margin-bottom:20px;text-transform:uppercase">Pitch Heatmap</h3>
-                    <div class="heatmap-container">
-                        <img src="" id="heatmapImg" class="heatmap-img">
-                    </div>
-                    <p style="margin-top:12px;font-size:0.85rem;opacity:0.6">주로 활동한 구역이 밝게 표시됩니다.</p>
-                </div>
-
-                <!-- Growth chart -->
-                <div class="section-card">
-                    <h3 style="color:var(--primary);margin-bottom:20px;text-transform:uppercase">Growth Progress</h3>
-                    <canvas id="growthChart" style="max-height:200px"></canvas>
-                </div>
+        <!-- Highlights split: Good / Bad -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:10px">
+          <div>
+            <h2 style="font-weight:900;margin-bottom:18px;color:#4ade80">✅ 좋은 장면</h2>
+            <div class="reel" id="reel-good"></div>
+          </div>
+          <div>
+            <h2 style="font-weight:900;margin-bottom:18px;color:#f87171">⚠️ 보완 필요 장면</h2>
+            <div id="reel-bad-wrap">
+              <p style="opacity:.45;font-size:.9rem">분석 완료 후 표시됩니다.<br>모든 볼 터치 클립이 먼저 제공되며,<br>직접 분류하거나 AI가 자동 분류합니다.</p>
+              <div class="reel" id="reel-bad"></div>
             </div>
-
-            <!-- Main content -->
-            <div>
-                <div class="section-card" style="padding:0;overflow:hidden;border:2px solid var(--primary)">
-                    <video id="mainResultVideo" controls style="width:100%;display:block"></video>
-                </div>
-
-                <div class="section-card">
-                    <h2 style="color:var(--primary);font-weight:900;margin-bottom:10px">AI PERFORMANCE COMMENT</h2>
-                    <div id="aiComment" class="ai-comment-box">분석 완료 후 스카우팅 리포트가 생성됩니다.</div>
-                </div>
-
-                <h2 style="font-weight:900;margin-bottom:25px;margin-top:30px;text-transform:uppercase">Individual Highlights</h2>
-                <div class="video-reel" id="highlightsReel"></div>
-            </div>
+          </div>
         </div>
-    </main>
+
+        <!-- All clips -->
+        <h2 style="font-weight:900;margin:36px 0 18px;text-transform:uppercase">All Highlight Clips</h2>
+        <div class="reel" id="reel-all"></div>
+      </div>
+    </div>
+  </main>
 </div>
 
-<!-- Analysis Overlay -->
-<div id="analysisOverlay">
-    <div style="font-size:10rem;margin-bottom:10px;filter:drop-shadow(0 0 40px var(--primary))">⚽</div>
-    <h1 style="font-size:3.5rem;font-weight:900;color:var(--primary);margin-bottom:8px">TAD AI ANALYSIS</h1>
-    <p style="opacity:0.6;font-size:1.1rem;margin-bottom:40px">정밀 분석 리포트를 생성 중입니다...</p>
-    <div class="progress-bar-container">
-        <div id="progress-fill"></div>
-    </div>
-    <div id="progressText" style="font-size:2rem;font-weight:900;margin-top:10px">0%</div>
-    <div id="timerText" style="opacity:0.5;margin-top:8px;font-size:0.95rem">예상 시간 계산 중...</div>
-    <div id="progressStatus" style="opacity:0.4;margin-top:6px;font-size:0.85rem">—</div>
+<!-- Progress overlay -->
+<div id="overlay">
+  <div style="font-size:8rem;margin-bottom:8px;filter:drop-shadow(0 0 40px var(--red))">⚽</div>
+  <h1 style="font-size:3rem;font-weight:900;color:var(--red);margin-bottom:6px">TAD AI ANALYSIS</h1>
+  <p style="opacity:.55;margin-bottom:36px">정밀 분석 진행 중...</p>
+  <div class="pbar-wrap"><div id="pbar"></div></div>
+  <div id="p-pct" style="font-size:1.8rem;font-weight:900;margin-top:8px">0%</div>
+  <div id="p-eta" style="opacity:.45;margin-top:6px;font-size:.88rem">예상 시간 계산 중...</div>
 </div>
 
 <script>
-    let sessionId = "";
-    let calibPoints = [];
-    let targetId = null;
-    let progressInterval = null;
-    let resultPollInterval = null;
+let SID="", calibPts=[], targetId=null, pInterval=null;
+const canvas=document.getElementById('c-canvas'), ctx=canvas.getContext('2d'), fImg=new Image();
 
-    const canvas = document.getElementById('calibrationCanvas');
-    const ctx = canvas.getContext('2d');
-    const frameImg = new Image();
+// ── Boot ─────────────────────────────────────────────────────────────────────
+window.onload = async () => {
+  setTimeout(()=>document.getElementById('loader').classList.remove('on'), 700);
+  const me = await fetch('/api/me').then(r=>r.json());
+  if(me.logged_in){
+    hideAuth();
+    document.getElementById('hdr-name').innerText = me.username;
+    show('step-profile');
+  }
+};
 
-    window.onload = () => {
-        setTimeout(() => document.getElementById('initialLoader').classList.remove('active'), 900);
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function switchTab(t){
+  ['login','register'].forEach(x=>{
+    document.getElementById('form-'+x).classList.toggle('hidden', x!==t);
+    document.getElementById('tab-'+x).classList.toggle('active', x===t);
+  });
+}
+function hideAuth(){ document.getElementById('auth-modal').classList.add('hidden'); }
+
+async function doLogin(){
+  const email=val('l-email'), pass=val('l-pass');
+  const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})}).then(x=>x.json());
+  if(r.error){ document.getElementById('l-err').innerText=r.error; return; }
+  document.getElementById('hdr-name').innerText=r.username;
+  hideAuth(); show('step-profile');
+}
+async function doRegister(){
+  const name=val('r-name'), email=val('r-email'), pass=val('r-pass');
+  if(pass.length<6){ document.getElementById('r-err').innerText='비밀번호는 6자 이상이어야 합니다.'; return; }
+  const r = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:name,email,password:pass})}).then(x=>x.json());
+  if(r.error){ document.getElementById('r-err').innerText=r.error; return; }
+  document.getElementById('hdr-name').innerText=r.username;
+  hideAuth(); show('step-profile');
+}
+async function doLogout(){
+  await fetch('/api/logout',{method:'POST'});
+  location.reload();
+}
+
+// ── Profile image preview ────────────────────────────────────────────────────
+document.getElementById('pf-img').onchange = e => {
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=ev=>document.getElementById('card-img').src=ev.target.result; rd.readAsDataURL(f);
+};
+
+// ── Step transitions ──────────────────────────────────────────────────────────
+function goUpload(){
+  const p={
+    name: val('pf-name')||'PLAYER',
+    team: val('pf-team')||'FC TEAM',
+    pos:  val('pf-pos') ||'ST',
+    foot: document.getElementById('pf-foot').value,
+    birth:document.getElementById('pf-birth').value.replace(/-/g,'.')||'—'
+  };
+  sessionStorage.setItem('profile', JSON.stringify(p));
+  hide('step-profile'); show('step-upload');
+}
+
+function handleUpload(){
+  const file=document.getElementById('vid-input').files[0]; if(!file) return;
+  const p=JSON.parse(sessionStorage.getItem('profile')||'{}');
+  const fd=new FormData();
+  fd.append('video', file);
+  fd.append('position', p.pos||'ST');
+  fd.append('player_name', p.name||'PLAYER');
+
+  document.getElementById('step-upload').innerHTML="<h1 style='font-size:2.8rem;font-weight:900'>업로드 중...</h1><p style='opacity:.6;margin-top:14px'>첫 프레임 분석 중</p>";
+
+  fetch('/upload',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
+    if(d.error){alert('업로드 오류: '+d.error);return;}
+    SID=d.session_id;
+    fImg.src=d.frame_url;
+    fImg.onload=()=>{
+      const ratio=Math.min(window.innerWidth*.76/fImg.width, 560/fImg.height);
+      canvas.width=fImg.width*ratio; canvas.height=fImg.height*ratio;
+      ctx.drawImage(fImg,0,0,canvas.width,canvas.height);
+      hide('step-upload'); show('step-calib');
     };
+  }).catch(e=>alert('서버 오류: '+e));
+}
 
-    document.getElementById('prof-img-input').onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = ev => document.getElementById('card-player-img').src = ev.target.result;
-        reader.readAsDataURL(file);
-    };
+canvas.onclick=e=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=e.clientX-rect.left, y=e.clientY-rect.top;
+  const rx=x*(fImg.width/canvas.width), ry=y*(fImg.height/canvas.height);
+  if(calibPts.length<4){
+    calibPts.push([rx,ry]); dot(x,y,'#ff1a1a',calibPts.length);
+    document.getElementById('c-cnt').innerText=calibPts.length;
+  } else if(!targetId){
+    targetId={x:rx,y:ry}; dot(x,y,'#ffd700','★');
+    document.getElementById('c-status').innerText='선수 선택 완료!';
+    document.getElementById('c-btn').disabled=false;
+  }
+};
+function dot(x,y,col,lbl){
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 13px Outfit'; ctx.fillText(lbl,x+12,y+5);
+}
 
-    function goToUpload() {
-        const profile = {
-            name: document.getElementById('prof-name').value.trim() || "PLAYER",
-            team: document.getElementById('prof-team').value.trim() || "FC TEAM",
-            pos:  document.getElementById('prof-pos').value.trim() || "ST",
-            foot: document.getElementById('prof-foot').value,
-            birth: document.getElementById('prof-birth').value.replace(/-/g, '.') || "—",
-        };
-        sessionStorage.setItem('userProfile', JSON.stringify(profile));
-        show('step-upload'); hide('step-profile');
-    }
+// ── Analysis ──────────────────────────────────────────────────────────────────
+function startAnalysis(){
+  if(calibPts.length<4||!targetId){alert('경기장 4모서리와 선수를 먼저 클릭하세요.');return;}
+  document.getElementById('overlay').classList.add('on');
 
-    function handleUpload() {
-        const file = document.getElementById('videoInput').files[0];
-        if (!file) return;
+  fetch('/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:SID,points:calibPts,target_id:targetId})
+  }).then(r=>r.json()).then(d=>{
+    if(d.error){stopOverlay();alert('오류: '+d.error);return;}
+    pollProgress();
+  }).catch(e=>{stopOverlay();alert('서버 오류: '+e);});
+}
 
-        const profile = JSON.parse(sessionStorage.getItem('userProfile') || '{}');
-        const formData = new FormData();
-        formData.append('video', file);
-        formData.append('position', profile.pos || 'ST');
-        formData.append('player_name', profile.name || 'PLAYER');
+function pollProgress(){
+  const t0=Date.now();
+  pInterval=setInterval(()=>{
+    fetch('/progress/'+SID).then(r=>r.json()).then(d=>{
+      const pct=d.percent||0;
+      document.getElementById('pbar').style.width=pct+'%';
+      document.getElementById('p-pct').innerText=pct+'%';
+      const el=(Date.now()-t0)/1000;
+      if(pct>5){ const rem=Math.max(0,Math.round((el/pct)*(100-pct))); document.getElementById('p-eta').innerText=`약 ${rem}초 남음`; }
+      if(d.status==='completed'){ clearInterval(pInterval); fetchResult(); }
+      else if(d.status==='error'){ clearInterval(pInterval); stopOverlay(); alert('분석 오류: '+(d.message||'')); }
+    });
+  },1500);
+}
 
-        document.getElementById('step-upload').innerHTML =
-            "<h1 style='font-size:3rem;font-weight:900'>영상 업로드 중...</h1><p style='opacity:0.6;margin-top:16px'>AI가 첫 프레임을 분석하고 있습니다.</p>";
+function fetchResult(){
+  fetch('/results/'+SID).then(r=>r.json()).then(d=>{
+    if(d.status==='processing'){setTimeout(fetchResult,2000);return;}
+    if(d.error){stopOverlay();alert('오류: '+d.error);return;}
+    stopOverlay(); renderDash(d);
+  });
+}
+function stopOverlay(){ clearInterval(pInterval); document.getElementById('overlay').classList.remove('on'); }
 
-        fetch('/upload', { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) { alert("업로드 오류: " + data.error); return; }
-                sessionId = data.session_id;
-                frameImg.src = data.frame_url;
-                frameImg.onload = () => {
-                    const ratio = Math.min(window.innerWidth * 0.78 / frameImg.width, 580 / frameImg.height);
-                    canvas.width  = frameImg.width  * ratio;
-                    canvas.height = frameImg.height * ratio;
-                    ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
-                    show('step-calibrate'); hide('step-upload');
-                };
-            })
-            .catch(e => alert("서버 오류: " + e));
-    }
+// ── Dashboard render ──────────────────────────────────────────────────────────
+function renderDash(data){
+  hide('step-calib'); show('step-dash');
+  const p=tryJSON(sessionStorage.getItem('profile'))||{};
+  document.getElementById('d-name').innerText  = p.name||'PLAYER';
+  document.getElementById('d-pos').innerText   = p.pos||'ST';
+  document.getElementById('d-foot').innerText  = (p.foot||'RIGHT').toUpperCase();
+  document.getElementById('d-birth').innerText = p.birth||'—';
+  document.getElementById('d-team').innerText  = p.team||'—';
 
-    canvas.onclick = (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const rx = x * (frameImg.width  / canvas.width);
-        const ry = y * (frameImg.height / canvas.height);
+  if(data.stats){
+    const s=data.stats;
+    setText('s-pac',s.PAC); setText('s-dri',s.DRI); setText('s-sho',s.SHO);
+    setText('s-pas',s.PAS); setText('s-phy',s.PHY);
+    setText('d-dist', s.total_distance_km??'—');
+    setText('d-spd',  s.top_speed_kmh??'—');
+    setText('d-spr',  s.sprint_count??'—');
+  }
 
-        if (calibPoints.length < 4) {
-            calibPoints.push([rx, ry]);
-            drawDot(x, y, '#ff1a1a', calibPoints.length);
-            document.getElementById('calib-count').innerText = calibPoints.length;
-            if (calibPoints.length === 4)
-                document.getElementById('calib-hint').innerText = '이제 분석할 선수를 클릭하세요!';
-        } else if (targetId === null) {
-            targetId = { x: rx, y: ry };
-            drawDot(x, y, '#ffd700', '★');
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('calib-status').innerText = '선수 선택 완료! 분석 시작 버튼을 누르세요.';
+  if(data.heatmap_url) document.getElementById('hm-img').src=data.heatmap_url+'?v='+Date.now();
+
+  if(data.ai_comment){
+    const r=data.ai_comment;
+    document.getElementById('ai-box').innerHTML=`
+      <div style="margin-bottom:16px">
+        <h4 style="color:#4ade80;margin-bottom:8px">◈ STRENGTHS</h4>
+        <ul style="list-style:none;padding-left:10px">${(r.pros||[]).map(p=>`<li style="margin-bottom:5px">✓ ${p}</li>`).join('')||'<li style="opacity:.4">데이터 축적 중</li>'}</ul>
+      </div>
+      <div style="margin-bottom:16px">
+        <h4 style="color:#f87171;margin-bottom:8px">◈ AREAS TO IMPROVE</h4>
+        <ul style="list-style:none;padding-left:10px">${(r.cons||[]).map(c=>`<li style="margin-bottom:5px">⚠ ${c}</li>`).join('')||'<li style="opacity:.4">보완점 없음</li>'}</ul>
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,.1);padding-top:12px">
+        <span style="font-weight:800;color:var(--gold);display:block;margin-bottom:5px">AI SCOUTING NOTE</span>
+        <p style="font-style:italic;opacity:.85;font-size:.9rem">"${r.scouting_note}"</p>
+      </div>`;
+  }
+
+  if(data.video_url){ const v=document.getElementById('main-vid'); v.src=data.video_url; v.play().catch(()=>{}); }
+
+  // Highlight clips — split good/bad by category
+  const goodCats = ['Dribble','Sprint Run','Ball Touch'];  // all are initially "good"
+  const goodReel = document.getElementById('reel-good');
+  const allReel  = document.getElementById('reel-all');
+  goodReel.innerHTML=''; allReel.innerHTML='';
+
+  if(data.highlights && data.highlights.length){
+    data.highlights.forEach((h,i)=>{
+      const isDribble = h.category==='Dribble';
+      const isSprint  = h.category==='Sprint Run';
+      const tagClass  = isDribble||isSprint ? 'tag-good' : 'tag-neutral';
+      const tagLabel  = isDribble ? '드리블' : isSprint ? '스프린트' : '볼 터치';
+
+      const card = makeClipCard(h, tagClass, tagLabel);
+
+      // All clips go into good section + all section
+      goodReel.appendChild(card.cloneNode(true));
+      allReel.appendChild(card);
+    });
+    // Attach click listeners
+    [goodReel, allReel].forEach(reel=>{
+      reel.querySelectorAll('.clip-card').forEach(c=>{
+        c.onclick=()=>{ const v=document.getElementById('main-vid'); v.src=c.dataset.url; v.play().catch(()=>{}); };
+      });
+    });
+    document.getElementById('reel-bad-wrap').innerHTML=`
+      <p style="opacity:.5;font-size:.85rem;margin-bottom:12px">직접 드래그하여 보완 장면으로 분류할 수 있습니다.</p>
+      <div class="reel" id="reel-bad" ondragover="event.preventDefault()" ondrop="dropBad(event)"></div>`;
+  } else {
+    goodReel.innerHTML="<p style='opacity:.4'>하이라이트 클립이 없습니다. 더 긴 영상을 사용해 주세요.</p>";
+  }
+
+  // Growth chart
+  fetch('/history').then(r=>r.json()).then(hist=>{
+    if(!hist.length) return;
+    const gCtx=document.getElementById('growth-chart').getContext('2d');
+    new Chart(gCtx,{
+      type:'line',
+      data:{
+        labels: hist.map(h=>h.date?h.date.split(' ')[0]:'—'),
+        datasets:[
+          {label:'PAC',data:hist.map(h=>h.stats?.PAC),borderColor:'#ff1a1a',tension:.4,fill:false},
+          {label:'PHY',data:hist.map(h=>h.stats?.PHY),borderColor:'#ffd700',tension:.4,fill:false},
+          {label:'DRI',data:hist.map(h=>h.stats?.DRI),borderColor:'#4ade80',tension:.4,fill:false},
+        ]
+      },
+      options:{
+        plugins:{legend:{labels:{color:'#fff',font:{size:10}}}},
+        scales:{
+          y:{grid:{color:'rgba(255,255,255,.07)'},ticks:{color:'#fff'}},
+          x:{grid:{color:'rgba(255,255,255,.07)'},ticks:{color:'#fff'}}
         }
-    };
+      }
+    });
+  });
+}
 
-    function drawDot(x, y, color, label) {
-        ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = "bold 13px Outfit";
-        ctx.fillText(label, x + 12, y + 5);
+function makeClipCard(h, tagClass, tagLabel){
+  const c=document.createElement('div');
+  c.className='clip-card'; c.dataset.url=h.url;
+  c.draggable=true;
+  c.ondragstart=e=>e.dataTransfer.setData('text/plain', h.url);
+  c.innerHTML=`
+    <video src="${h.url}" muted style="width:100%" preload="metadata"></video>
+    <div style="padding:12px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <span class="clip-tag ${tagClass}">${tagLabel}</span>
+        ${h.speed_kmh>1?`<span style="font-size:.72rem;opacity:.5;margin-left:8px">${h.speed_kmh} km/h</span>`:''}
+      </div>
+      <a href="${h.url}" download style="color:#fff;font-size:.68rem;font-weight:700;text-decoration:none;border:1px solid var(--border);padding:4px 9px;border-radius:6px" onclick="e=>e.stopPropagation()">SAVE</a>
+    </div>`;
+  return c;
+}
+
+function dropBad(e){
+  const url=e.dataTransfer.getData('text/plain');
+  const reel=document.getElementById('reel-bad');
+  // find the card in good reel and move it
+  document.querySelectorAll('.clip-card').forEach(c=>{
+    if(c.dataset.url===url && c.closest('#reel-good')){
+      const clone=c.cloneNode(true);
+      clone.querySelector('.clip-tag').className='clip-tag tag-bad';
+      clone.querySelector('.clip-tag').innerText='보완 필요';
+      clone.onclick=()=>{ const v=document.getElementById('main-vid'); v.src=url; v.play().catch(()=>{}); };
+      reel.appendChild(clone);
+      c.remove();
     }
+  });
+}
 
-    function startDeepAnalysis() {
-        if (calibPoints.length < 4 || !targetId) {
-            alert("경기장 4모서리와 선수를 먼저 선택해 주세요.");
-            return;
-        }
-        document.getElementById('analysisOverlay').classList.add('active');
-        document.getElementById('header-stats').classList.remove('hidden');
+function dlCard(){
+  const p=tryJSON(sessionStorage.getItem('profile'))||{};
+  html2canvas(document.getElementById('card-wrap'),{backgroundColor:null,useCORS:true,scale:2}).then(c=>{
+    const a=document.createElement('a');
+    a.download=`${p.name||'player'}_tad_card.png`; a.href=c.toDataURL(); a.click();
+  });
+}
 
-        // POST to start async analysis
-        fetch('/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_id: sessionId, points: calibPoints, target_id: targetId })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) { stopAnalysis(); alert("오류: " + data.error); return; }
-            startPolling();
-        })
-        .catch(e => { stopAnalysis(); alert("서버 오류: " + e); });
-    }
-
-    function startPolling() {
-        let startTime = Date.now();
-
-        progressInterval = setInterval(() => {
-            fetch(`/progress/${sessionId}`)
-                .then(r => r.json())
-                .then(data => {
-                    const pct = data.percent || 0;
-                    document.getElementById('progress-fill').style.width = pct + "%";
-                    document.getElementById('progressText').innerText = pct + "%";
-                    document.getElementById('progressStatus').innerText = data.status || "";
-
-                    const elapsed = (Date.now() - startTime) / 1000;
-                    if (pct > 5) {
-                        const remaining = Math.max(0, Math.round((elapsed / pct) * (100 - pct)));
-                        document.getElementById('timerText').innerText = `약 ${remaining}초 남음`;
-                    }
-
-                    if (data.status === 'completed') {
-                        clearInterval(progressInterval);
-                        fetchResults();
-                    } else if (data.status === 'error') {
-                        clearInterval(progressInterval);
-                        stopAnalysis();
-                        alert("분석 오류: " + (data.message || "알 수 없는 오류"));
-                    }
-                });
-        }, 1500);
-    }
-
-    function fetchResults() {
-        fetch(`/results/${sessionId}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'processing') {
-                    setTimeout(fetchResults, 2000);
-                    return;
-                }
-                if (data.error) { stopAnalysis(); alert("오류: " + data.error); return; }
-                stopAnalysis();
-                renderDashboard(data);
-            });
-    }
-
-    function stopAnalysis() {
-        clearInterval(progressInterval);
-        clearInterval(resultPollInterval);
-        document.getElementById('analysisOverlay').classList.remove('active');
-    }
-
-    function renderDashboard(data) {
-        hide('step-calibrate');
-        show('step-dashboard');
-
-        const profile = (() => { try { return JSON.parse(sessionStorage.getItem('userProfile')); } catch(e) { return {}; } })() || {};
-        document.getElementById('playerNameDisplay').innerText = profile.name || "PLAYER";
-        document.getElementById('playerPosDisplay').innerText  = profile.pos  || "—";
-        document.getElementById('playerFootDisplay').innerText = (profile.foot || "RIGHT").toUpperCase();
-        document.getElementById('playerBirthDisplay').innerText = profile.birth || "—";
-        document.getElementById('playerTeamDisplay').innerText  = profile.team || "—";
-
-        if (data.stats) {
-            const s = data.stats;
-            document.getElementById('stat-PAC').innerText = s.PAC || "—";
-            document.getElementById('stat-DRI').innerText = s.DRI || "—";
-            document.getElementById('stat-SHO').innerText = s.SHO || "—";
-            document.getElementById('stat-PAS').innerText = s.PAS || "—";
-            document.getElementById('stat-PHY').innerText = s.PHY || "—";
-            document.getElementById('stat-dist').innerText   = s.total_distance_km ?? "—";
-            document.getElementById('stat-speed').innerText  = s.top_speed_kmh ?? "—";
-            document.getElementById('stat-sprints').innerText = s.sprint_count ?? "—";
-        }
-
-        if (data.heatmap_url) {
-            document.getElementById('heatmapImg').src = data.heatmap_url + "?v=" + Date.now();
-        }
-
-        if (data.ai_comment) {
-            const r = data.ai_comment;
-            document.getElementById('aiComment').innerHTML = `
-                <div style="margin-bottom:18px">
-                    <h4 style="color:#4ade80;margin-bottom:8px">◈ STRENGTHS</h4>
-                    <ul style="list-style:none;padding-left:10px">
-                        ${(r.pros || []).map(p => `<li style="margin-bottom:6px">✓ ${p}</li>`).join('') || '<li style="opacity:0.5">데이터 축적 중</li>'}
-                    </ul>
-                </div>
-                <div style="margin-bottom:18px">
-                    <h4 style="color:#f87171;margin-bottom:8px">◈ AREAS TO IMPROVE</h4>
-                    <ul style="list-style:none;padding-left:10px">
-                        ${(r.cons || []).map(c => `<li style="margin-bottom:6px">⚠ ${c}</li>`).join('') || '<li style="opacity:0.5">보완점 없음</li>'}
-                    </ul>
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:14px">
-                    <span style="display:block;font-weight:800;color:var(--accent);margin-bottom:6px">AI SCOUTING NOTE</span>
-                    <p style="font-size:0.9rem;font-style:italic;opacity:0.85">"${r.scouting_note}"</p>
-                </div>
-            `;
-        }
-
-        if (data.video_url) {
-            const v = document.getElementById('mainResultVideo');
-            v.src = data.video_url;
-            v.play().catch(() => {});
-        }
-
-        const reel = document.getElementById('highlightsReel');
-        reel.innerHTML = "";
-        if (data.highlights && data.highlights.length > 0) {
-            data.highlights.forEach(h => {
-                const card = document.createElement('div');
-                card.className = "clip-card";
-                card.innerHTML = `
-                    <video src="${h.url}" muted style="width:100%" preload="metadata"></video>
-                    <div style="padding:14px;display:flex;justify-content:space-between;align-items:center">
-                        <div>
-                            <span style="color:var(--primary);font-weight:900;font-size:0.8rem;display:block">${(h.category||'HIGHLIGHT').toUpperCase()}</span>
-                            ${h.speed_kmh > 1 ? `<span style="font-size:0.75rem;opacity:0.6">${h.speed_kmh} km/h</span>` : ''}
-                        </div>
-                        <a href="${h.url}" download style="color:#fff;font-size:0.7rem;font-weight:700;text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px">SAVE</a>
-                    </div>
-                `;
-                card.onclick = () => {
-                    const v = document.getElementById('mainResultVideo');
-                    v.src = h.url; v.play().catch(() => {});
-                };
-                reel.appendChild(card);
-            });
-        } else {
-            reel.innerHTML = "<p style='opacity:0.5;padding:20px'>하이라이트 클립이 없습니다. 더 긴 영상을 시도해 보세요.</p>";
-        }
-
-        // Growth chart
-        fetch('/history').then(r => r.json()).then(history => {
-            if (!history.length) return;
-            const chartCtx = document.getElementById('growthChart').getContext('2d');
-            new Chart(chartCtx, {
-                type: 'line',
-                data: {
-                    labels: history.map(h => h.date ? h.date.split(' ')[0] : '—'),
-                    datasets: [
-                        { label:'PAC', data: history.map(h => h.stats?.PAC), borderColor:'#ff1a1a', tension:0.4, fill:false },
-                        { label:'PHY', data: history.map(h => h.stats?.PHY), borderColor:'#ffd700', tension:0.4, fill:false }
-                    ]
-                },
-                options: {
-                    plugins: { legend: { labels: { color:'#fff', font:{ size:10 } } } },
-                    scales: {
-                        y: { grid:{ color:'rgba(255,255,255,0.08)' }, ticks:{ color:'#fff' } },
-                        x: { grid:{ color:'rgba(255,255,255,0.08)' }, ticks:{ color:'#fff' } }
-                    }
-                }
-            });
-        });
-    }
-
-    function downloadCard() {
-        const profile = (() => { try { return JSON.parse(sessionStorage.getItem('userProfile')); } catch(e) { return {}; } })() || {};
-        html2canvas(document.getElementById('card-to-save'), { backgroundColor:null, useCORS:true, scale:2 }).then(c => {
-            const a = document.createElement('a');
-            a.download = `${profile.name || 'player'}_tad_report.png`;
-            a.href = c.toDataURL(); a.click();
-        });
-    }
-
-    function show(id) { document.getElementById(id).classList.remove('hidden'); }
-    function hide(id) { document.getElementById(id).classList.add('hidden'); }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function show(id){ document.getElementById(id).classList.remove('hidden'); }
+function hide(id){ document.getElementById(id).classList.add('hidden'); }
+function val(id){ return document.getElementById(id).value.trim(); }
+function setText(id,v){ document.getElementById(id).innerText=v??'—'; }
+function tryJSON(s){ try{return JSON.parse(s);}catch(e){return null;} }
 </script>
 </body>
 </html>

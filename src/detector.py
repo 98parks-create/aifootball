@@ -6,173 +6,252 @@ from ultralytics import YOLO
 from src.transformer import ViewTransformer
 from src.analyzer import FootballAnalyzer
 
+
 class FootballDetector:
-    def __init__(self, model_path='models/yolov8s.pt'): # 8n -> 8s 모델 업그레이드 (공 인식 정확도 향상)
+    def __init__(self, model_path='models/yolov8s.pt'):
         self.model = YOLO(model_path)
-        self.tracker = sv.ByteTrack()
-        self.box_annotator = sv.BoxAnnotator()
-        self.label_annotator = sv.LabelAnnotator()
         self.analyzer = FootballAnalyzer()
-        self.player_tracks = {} 
+        self.player_tracks = {}
+        self._target_hist = None       # jersey color histogram for re-ID
+        self._target_hist_count = 0
+
+    # ── Appearance Re-ID ─────────────────────────────────────────────────────
+
+    def _extract_jersey_hist(self, frame, bbox):
+        x1 = max(0, int(bbox[0]));  y1 = max(0, int(bbox[1]))
+        x2 = min(frame.shape[1], int(bbox[2]));  y2 = min(frame.shape[0], int(bbox[3]))
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0:
+            return None
+        torso = roi[:max(1, int(roi.shape[0] * 0.5)), :]
+        if torso.size == 0:
+            return None
+        hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [32, 32], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        return hist
+
+    def _update_target_hist(self, frame, bbox):
+        h = self._extract_jersey_hist(frame, bbox)
+        if h is None:
+            return
+        if self._target_hist is None:
+            self._target_hist = h.copy()
+            self._target_hist_count = 1
+        else:
+            n = min(self._target_hist_count, 15)
+            self._target_hist = (self._target_hist * n + h) / (n + 1)
+            self._target_hist_count += 1
+
+    def _best_appearance_match(self, frame, dets, threshold=0.45):
+        if self._target_hist is None:
+            return None
+        best_i, best_s = None, threshold
+        for i in range(len(dets)):
+            if dets.class_id[i] != 0:
+                continue
+            h = self._extract_jersey_hist(frame, dets.xyxy[i])
+            if h is None:
+                continue
+            s = cv2.compareHist(self._target_hist, h, cv2.HISTCMP_CORREL)
+            if s > best_s:
+                best_s, best_i = s, i
+        return best_i
+
+    # ── Public API ───────────────────────────────────────────────────────────
 
     def detect_players_for_selection(self, video_path):
-        """첫 프레임에서 모든 선수들의 좌표와 ID를 추출하여 반환"""
         cap = cv2.VideoCapture(video_path)
-        success, frame = cap.read()
+        ok, frame = cap.read()
         cap.release()
-        
-        if not success:
+        if not ok:
             return []
-            
-        results = self.model(frame)[0]
-        detections = sv.Detections.from_ultralytics(results)
-        # 0: person, 32: sports ball
-        detections = detections[(detections.class_id == 0) | (detections.class_id == 32)]
-        
+        results = self.model(frame, conf=0.2, verbose=False)[0]
+        dets = sv.Detections.from_ultralytics(results)
+        dets = dets[(dets.class_id == 0) | (dets.class_id == 32)]
         players = []
-        for i, (xyxy, mask, conf, class_id, tracker_id, data) in enumerate(detections):
+        for i, (xyxy, _, conf, class_id, _, _) in enumerate(dets):
             x1, y1, x2, y2 = xyxy
             players.append({
-                "id": i, 
-                "class": self.model.model.names[class_id],
+                "id": i,
+                "class": self.model.model.names[int(class_id)],
                 "x": float((x1 + x2) / 2),
-                "y": float(y2), 
-                "bbox": [float(x1), float(y1), float(x2), float(y2)]
+                "y": float(y2),
+                "bbox": [float(x1), float(y1), float(x2), float(y2)],
             })
         return players
 
-    def process_video_v2(self, input_path, output_path, calibration_points, target_player_id, progress_callback=None):
-        """보정 좌표와 타겟 플레이어를 사용하여 정밀 분석 수행"""
-        print(f"Starting advanced ball-centric processing for {input_path}")
-        
-        target_field = np.array([[0,0], [100,0], [100,50], [0,50]], dtype=np.float32)
-        source_field = np.array(calibration_points, dtype=np.float32)
-        transformer = ViewTransformer(source_field, target_field)
-        
-        video_info = sv.VideoInfo.from_video_path(input_path)
-        total_frames = video_info.total_frames
-        target_track_id = None
-        
-        # 타켓 추적 상태 관리
-        last_target_pos = None 
+    def process_video_v2(self, input_path, output_path, calibration_points,
+                         target_player_id, progress_callback=None):
+        print(f"[TAD] Starting tracking: {input_path}")
 
-        def process_frame(frame: np.ndarray, index: int) -> np.ndarray:
-            nonlocal target_track_id, last_target_pos
-            try:
-                if progress_callback and index % 10 == 0:
-                    percent = (index / total_frames) * 100
-                    progress_callback(percent)
+        src = np.array(calibration_points, dtype=np.float32)
+        dst = np.array([[0,0],[100,0],[100,50],[0,50]], dtype=np.float32)
+        transformer = ViewTransformer(src, dst)
 
-                results = self.model(frame, conf=0.15)[0] 
-                detections = sv.Detections.from_ultralytics(results)
-                detections = detections[(detections.class_id == 0) | (detections.class_id == 32)]
-                detections = self.tracker.update_with_detections(detections)
-                
-                # --- 타겟 락 / 복구 로직 ---
-                current_target_detected = False
-                if len(detections) > 0:
-                    # 1. 기존 ID 검색
-                    if target_track_id is not None:
-                        for i, tid in enumerate(detections.tracker_id):
-                            if int(tid) == target_track_id:
-                                xyxy = detections.xyxy[i]
-                                last_target_pos = [(xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2]
-                                current_target_detected = True
-                                break
-                    
-                    # 2. 로스트 시 반경 내 재탐색 (ID가 바뀌었을 가능성 대비)
-                    if not current_target_detected and last_target_pos is not None:
-                        min_dist = 150 # 150px 이내에서 재탐색
-                        for i, (xyxy, _, _, _, tid, _) in enumerate(detections):
-                            if detections.class_id[i] == 0:
-                                cx, cy = (xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2
-                                dist = np.sqrt((cx - last_target_pos[0])**2 + (cy - last_target_pos[1])**2)
-                                if dist < min_dist:
-                                    target_track_id = int(tid)
-                                    last_target_pos = [cx, cy]
-                                    current_target_detected = True
-                                    print(f"Target re-acquired at frame {index}! ID: {target_track_id}")
-                                    break
+        info = sv.VideoInfo.from_video_path(input_path)
+        total_frames = max(info.total_frames, 1)
+        fps = info.fps or 25
 
-                    # 3. 최초 락 (Step 0 에서 선택한 좌표 기반)
-                    if target_track_id is None:
-                        min_dist = 120
-                        for i, (xyxy, _, _, _, tid, _) in enumerate(detections):
-                            if detections.class_id[i] == 0: 
-                                cx, cy = (xyxy[0] + xyxy[2]) / 2, xyxy[3] 
-                                dist = np.sqrt((cx - target_player_id['x'])**2 + (cy - target_player_id['y'])**2)
-                                if dist < min_dist: 
-                                    min_dist = dist
-                                    target_track_id = int(tid)
-                                    last_target_pos = [cx, cy]
-                                    print(f"Initial Target locked! ID: {target_track_id}")
-
-                if len(detections) > 0:
-                    points = detections.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
-                    transformed_points = transformer.transform_points(points)
-                    
-                    for i, track_id in enumerate(detections.tracker_id):
-                        pos = transformed_points[i]
-                        tid = int(track_id)
-                        xyxy = detections.xyxy[i]
-                        pos_px = [(xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2]
-                        
-                        if tid not in self.player_tracks: self.player_tracks[tid] = []
-                        self.player_tracks[tid].append({
-                            "frame": int(index), "pos": pos.tolist(), "pos_px": pos_px,
-                            "class": int(detections.class_id[i]), "conf": float(detections.confidence[i])
-                        })
-
-                # Spotlight 모드 가시화
-                annotated_frame = frame.copy()
-                if target_track_id is not None:
-                    mask = (detections.tracker_id == target_track_id)
-                    target_detections = detections[mask]
-                    if len(target_detections) > 0:
-                        annotated_frame = self.box_annotator.annotate(scene=annotated_frame, detections=target_detections)
-                        annotated_frame = self.label_annotator.annotate(scene=annotated_frame, detections=target_detections, labels=[f"TARGET #{target_track_id}"])
-                return annotated_frame
-            except Exception as e:
-                print(f"Error processing frame {index}: {e}")
-                return frame
-
-        # 비디오 처리 (OpenCV 직접 제어하여 코덱 호환성 확보)
         cap = cv2.VideoCapture(input_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        if not out.isOpened():
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        frame_index = 0
+        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (W, H))
+        if not out.isOpened():
+            out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (W, H))
+
+        target_id = None
+        last_px = None          # last known pixel centre of target
+        frames_lost = 0
+        PROXY_WIN = int(fps * 2)     # 2s position-based recovery window
+        APPEAR_WIN = int(fps * 4)    # 4s → try appearance re-ID
+
+        idx = 0
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret: break
-            
-            # 프레임 처리 로직 호출
-            annotated_frame = process_frame(frame, frame_index)
-            out.write(annotated_frame)
-            frame_index += 1
-            
+            if not ret:
+                break
+
+            if progress_callback and idx % 15 == 0:
+                progress_callback((idx / total_frames) * 100)
+
+            try:
+                # YOLOv8 built-in tracking (persist=True keeps Kalman state across frames)
+                results = self.model.track(
+                    frame, persist=True, conf=0.2,
+                    classes=[0, 32], verbose=False
+                )[0]
+                dets = sv.Detections.from_ultralytics(results)
+
+                # filter unassigned detections
+                if dets.tracker_id is not None:
+                    valid = dets.tracker_id != -1
+                    dets = dets[valid]
+
+                found = False
+
+                if len(dets) > 0 and dets.tracker_id is not None:
+
+                    # ── 1. Current ID still visible ───────────────────────
+                    if target_id is not None:
+                        where = np.where(dets.tracker_id == target_id)[0]
+                        if len(where):
+                            i = where[0]
+                            xyxy = dets.xyxy[i]
+                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._update_target_hist(frame, xyxy)
+                            found = True
+                            frames_lost = 0
+
+                    # ── 2. Position-based recovery (< 2s gap, < 220px) ───
+                    if not found and last_px is not None and frames_lost < PROXY_WIN:
+                        best_i, best_d = None, 220.0
+                        for i in range(len(dets)):
+                            if dets.class_id[i] != 0:
+                                continue
+                            xyxy = dets.xyxy[i]
+                            cx = (xyxy[0]+xyxy[2])/2
+                            cy = (xyxy[1]+xyxy[3])/2
+                            d = np.hypot(cx - last_px[0], cy - last_px[1])
+                            if d < best_d:
+                                best_d, best_i = d, i
+                        if best_i is not None:
+                            target_id = int(dets.tracker_id[best_i])
+                            xyxy = dets.xyxy[best_i]
+                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._update_target_hist(frame, xyxy)
+                            found = True
+                            frames_lost = 0
+                            print(f"[TAD] Position re-lock f={idx} id={target_id}")
+
+                    # ── 3. Appearance re-ID (after long absence) ─────────
+                    if not found and frames_lost >= APPEAR_WIN:
+                        best_i = self._best_appearance_match(frame, dets, threshold=0.40)
+                        if best_i is not None:
+                            target_id = int(dets.tracker_id[best_i])
+                            xyxy = dets.xyxy[best_i]
+                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._update_target_hist(frame, xyxy)
+                            found = True
+                            frames_lost = 0
+                            print(f"[TAD] Appearance re-lock f={idx} id={target_id}")
+
+                    # ── 4. Initial lock (first frame encounter) ───────────
+                    if target_id is None:
+                        best_i, best_d = None, 140.0
+                        for i in range(len(dets)):
+                            if dets.class_id[i] != 0:
+                                continue
+                            xyxy = dets.xyxy[i]
+                            cx = (xyxy[0]+xyxy[2])/2
+                            cy = xyxy[3]  # bottom-centre for foot position
+                            d = np.hypot(cx - target_player_id['x'], cy - target_player_id['y'])
+                            if d < best_d:
+                                best_d, best_i = d, i
+                        if best_i is not None:
+                            target_id = int(dets.tracker_id[best_i])
+                            xyxy = dets.xyxy[best_i]
+                            last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
+                            self._update_target_hist(frame, xyxy)
+                            found = True
+                            print(f"[TAD] Initial lock id={target_id}")
+
+                    if not found:
+                        frames_lost += 1
+
+                    # ── Store all tracks ──────────────────────────────────
+                    pts = dets.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+                    tpts = transformer.transform_points(pts)
+                    for i in range(len(dets)):
+                        if dets.tracker_id[i] is None or dets.tracker_id[i] == -1:
+                            continue
+                        tid = int(dets.tracker_id[i])
+                        xyxy = dets.xyxy[i]
+                        if tid not in self.player_tracks:
+                            self.player_tracks[tid] = []
+                        self.player_tracks[tid].append({
+                            "frame": idx,
+                            "pos": tpts[i].tolist(),
+                            "pos_px": [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
+                            "class": int(dets.class_id[i]),
+                            "conf": float(dets.confidence[i]) if dets.confidence is not None else 0.5,
+                            "bbox": xyxy.tolist(),
+                        })
+
+                # ── Draw target overlay ───────────────────────────────────
+                annotated = frame.copy()
+                if target_id is not None and len(dets) > 0 and dets.tracker_id is not None:
+                    where = np.where(dets.tracker_id == target_id)[0]
+                    if len(where):
+                        xyxy = dets.xyxy[where[0]]
+                        x1, y1, x2, y2 = map(int, xyxy)
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 40, 255), 3)
+                        arm = min(35, (x2-x1)//3, (y2-y1)//3)
+                        for px, py in [(x1,y1),(x2,y1),(x1,y2),(x2,y2)]:
+                            dx = arm if px == x1 else -arm
+                            dy = arm if py == y1 else -arm
+                            cv2.line(annotated, (px,py), (px+dx, py), (0,215,255), 4)
+                            cv2.line(annotated, (px,py), (px, py+dy), (0,215,255), 4)
+                        cv2.putText(annotated, "TARGET", (x1, max(y1-10, 15)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,215,255), 2, cv2.LINE_AA)
+                out.write(annotated)
+
+            except Exception as e:
+                print(f"[TAD] Frame {idx} error: {e}")
+                import traceback; traceback.print_exc()
+                out.write(frame)
+
+            idx += 1
+
         cap.release()
         out.release()
-        
-        print(f"Processing complete. Target Track ID: {target_track_id}")
-        print(f"Total tracked players: {len(self.player_tracks)}")
-        
-        # 분석 결과 생성
-        stats = self.analyzer.calculate_individual_stats(self.player_tracks, target_track_id)
-        highlights = self.analyzer.extract_combined_highlights(input_path, self.player_tracks, target_track_id)
-        
-        print(f"Stats generated: {stats}")
-        print(f"Highlights count: {len(highlights)}")
-        
+        print(f"[TAD] Done. target_id={target_id}, players tracked={len(self.player_tracks)}")
+
+        stats = self.analyzer.calculate_individual_stats(
+            self.player_tracks, target_id, fps=fps
+        )
         return {
             "stats": stats,
-            "highlights": highlights,
-            "target_track_id": int(target_track_id) if target_track_id is not None else None
+            "target_track_id": int(target_id) if target_id is not None else None,
         }
