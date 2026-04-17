@@ -47,9 +47,13 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
 .clip-card{background:#111;border-radius:20px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:.3s;}
 .clip-card:hover{transform:translateY(-6px);border-color:var(--red);}
 .clip-tag{font-size:.75rem;font-weight:900;padding:3px 10px;border-radius:20px;display:inline-block;}
-.tag-good{background:rgba(74,222,128,.15);color:#4ade80;}
-.tag-bad{background:rgba(248,113,113,.15);color:#f87171;}
-.tag-neutral{background:rgba(255,215,0,.15);color:var(--gold);}
+.tag-attack {background:rgba(255,100,100,.18);color:#ff8080;}
+.tag-defense{background:rgba(100,180,255,.18);color:#64b4ff;}
+.tag-mid    {background:rgba(255,215,0,.15);color:var(--gold);}
+.tag-bad    {background:rgba(248,113,113,.15);color:#f87171;}
+.tag-goal   {background:rgba(255,215,0,.3);color:#ffd700;font-size:.85rem;}
+.sect-tab{background:rgba(255,255,255,.06);border:1px solid var(--border);color:#aaa;font-weight:700;padding:9px 20px;border-radius:100px;cursor:pointer;transition:.2s;font-size:.88rem;}
+.sect-tab.active{background:rgba(255,26,26,.2);border-color:var(--red);color:#fff;}
 /* progress overlay */
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.97);z-index:10000;display:flex;flex-direction:column;justify-content:center;align-items:center;backdrop-filter:blur(20px);opacity:0;pointer-events:none;transition:opacity .5s;}
 #overlay.on{opacity:1;pointer-events:auto;}
@@ -206,23 +210,14 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
           <div id="ai-box" style="background:linear-gradient(45deg,rgba(255,26,26,.08),transparent);border-left:4px solid var(--red);padding:18px;border-radius:0 14px 14px 0;font-size:1rem;line-height:1.65"></div>
         </div>
 
-        <!-- Highlights split: Good / Bad -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:10px">
-          <div>
-            <h2 style="font-weight:900;margin-bottom:18px;color:#4ade80">✅ 좋은 장면</h2>
-            <div class="reel" id="reel-good"></div>
-          </div>
-          <div>
-            <h2 style="font-weight:900;margin-bottom:18px;color:#f87171">⚠️ 보완 필요 장면</h2>
-            <div id="reel-bad-wrap">
-              <p style="opacity:.45;font-size:.9rem">분석 완료 후 표시됩니다.<br>모든 볼 터치 클립이 먼저 제공되며,<br>직접 분류하거나 AI가 자동 분류합니다.</p>
-              <div class="reel" id="reel-bad"></div>
-            </div>
-          </div>
+        <!-- Section tabs -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:30px;margin-bottom:24px">
+          <button class="sect-tab active" data-sect="all"     onclick="showSect('all')">🎬 전체</button>
+          <button class="sect-tab"        data-sect="attack"  onclick="showSect('attack')">⚽ 공격</button>
+          <button class="sect-tab"        data-sect="defense" onclick="showSect('defense')">🛡 수비</button>
+          <button class="sect-tab"        data-sect="midfield"onclick="showSect('midfield')">⚙️ 운동량</button>
+          <button class="sect-tab"        data-sect="bad"     onclick="showSect('bad')">⚠️ 보완 필요</button>
         </div>
-
-        <!-- All clips -->
-        <h2 style="font-weight:900;margin:36px 0 18px;text-transform:uppercase">All Highlight Clips</h2>
         <div class="reel" id="reel-all"></div>
       </div>
     </div>
@@ -420,36 +415,30 @@ function renderDash(data){
 
   if(data.video_url){ const v=document.getElementById('main-vid'); v.src=data.video_url; v.play().catch(()=>{}); }
 
-  // Highlight clips — split good/bad by category
-  const goodCats = ['Dribble','Sprint Run','Ball Touch'];  // all are initially "good"
-  const goodReel = document.getElementById('reel-good');
-  const allReel  = document.getElementById('reel-all');
-  goodReel.innerHTML=''; allReel.innerHTML='';
+  // ── Category metadata ──────────────────────────────────────────────────
+  const CAT = {
+    'GOAL':        {icon:'⚽', label:'골',        cls:'tag-goal',    sect:'attack'},
+    'SHOT':        {icon:'💥', label:'슈팅',       cls:'tag-attack',  sect:'attack'},
+    'DRIBBLE':     {icon:'🔥', label:'드리블',     cls:'tag-attack',  sect:'attack'},
+    'THROUGH BALL':{icon:'🎯', label:'스루패스',   cls:'tag-attack',  sect:'attack'},
+    'LONG PASS':   {icon:'📐', label:'롱패스',     cls:'tag-mid',     sect:'attack'},
+    'PASS':        {icon:'📐', label:'패스',       cls:'tag-mid',     sect:'midfield'},
+    'BALL TOUCH':  {icon:'🦶', label:'볼터치',     cls:'tag-mid',     sect:'midfield'},
+    'CONTROL':     {icon:'🎱', label:'볼컨트롤',   cls:'tag-mid',     sect:'midfield'},
+    'TACKLE':      {icon:'⚡', label:'태클',       cls:'tag-defense', sect:'defense'},
+    'INTERCEPTION':{icon:'✂️', label:'인터셉트',   cls:'tag-defense', sect:'defense'},
+    'CLEARANCE':   {icon:'💪', label:'클리어링',   cls:'tag-defense', sect:'defense'},
+    'SPRINT':      {icon:'🏃', label:'스프린트',   cls:'tag-mid',     sect:'midfield'},
+    'BALL LOST':   {icon:'❌', label:'볼 손실',    cls:'tag-bad',     sect:'bad'},
+    'ACTIVE PLAY': {icon:'▶️', label:'활동',       cls:'tag-mid',     sect:'midfield'},
+  };
+  function catInfo(cat){ return CAT[cat] || {icon:'▶️', label:cat, cls:'tag-mid', sect:'midfield'}; }
 
+  window._allHighlights = data.highlights || [];
   if(data.highlights && data.highlights.length){
-    data.highlights.forEach((h,i)=>{
-      const isDribble = h.category==='Dribble';
-      const isSprint  = h.category==='Sprint Run';
-      const tagClass  = isDribble||isSprint ? 'tag-good' : 'tag-neutral';
-      const tagLabel  = isDribble ? '드리블' : isSprint ? '스프린트' : '볼 터치';
-
-      const card = makeClipCard(h, tagClass, tagLabel);
-
-      // All clips go into good section + all section
-      goodReel.appendChild(card.cloneNode(true));
-      allReel.appendChild(card);
-    });
-    // Attach click listeners
-    [goodReel, allReel].forEach(reel=>{
-      reel.querySelectorAll('.clip-card').forEach(c=>{
-        c.onclick=()=>{ const v=document.getElementById('main-vid'); v.src=c.dataset.url; v.play().catch(()=>{}); };
-      });
-    });
-    document.getElementById('reel-bad-wrap').innerHTML=`
-      <p style="opacity:.5;font-size:.85rem;margin-bottom:12px">직접 드래그하여 보완 장면으로 분류할 수 있습니다.</p>
-      <div class="reel" id="reel-bad" ondragover="event.preventDefault()" ondrop="dropBad(event)"></div>`;
+    showSect('all');
   } else {
-    goodReel.innerHTML="<p style='opacity:.4'>하이라이트 클립이 없습니다. 더 긴 영상을 사용해 주세요.</p>";
+    document.getElementById('reel-all').innerHTML="<p style='opacity:.4'>하이라이트 클립이 없습니다. 더 긴 영상을 사용해 주세요.</p>";
   }
 
   // Growth chart
@@ -477,7 +466,31 @@ function renderDash(data){
   });
 }
 
-function makeClipCard(h, tagClass, tagLabel){
+function showSect(sect){
+  document.querySelectorAll('.sect-tab').forEach(t=>t.classList.toggle('active', t.dataset.sect===sect));
+  const reel = document.getElementById('reel-all');
+  reel.innerHTML = '';
+  const list = window._allHighlights || [];
+  const filtered = sect==='all' ? list : list.filter(h=>h.section===sect);
+  if(!filtered.length){
+    reel.innerHTML="<p style='opacity:.4'>해당 섹션의 클립이 없습니다.</p>";
+    return;
+  }
+  filtered.forEach(h=>reel.appendChild(makeClipCard(h)));
+  attachClicks(reel);
+}
+
+function attachClicks(container){
+  container.querySelectorAll('.clip-card').forEach(c=>{
+    c.onclick=()=>{
+      const v=document.getElementById('main-vid');
+      v.src=c.dataset.url; v.play().catch(()=>{});
+    };
+  });
+}
+
+function makeClipCard(h){
+  const info = (typeof CAT!=='undefined' && CAT[h.category]) || {icon:'▶️', label:h.category||'클립', cls:'tag-mid'};
   const c=document.createElement('div');
   c.className='clip-card'; c.dataset.url=h.url;
   c.draggable=true;
@@ -486,29 +499,14 @@ function makeClipCard(h, tagClass, tagLabel){
     <video src="${h.url}" muted style="width:100%" preload="metadata"></video>
     <div style="padding:12px;display:flex;justify-content:space-between;align-items:center">
       <div>
-        <span class="clip-tag ${tagClass}">${tagLabel}</span>
+        <span class="clip-tag ${info.cls}">${info.icon} ${info.label}</span>
         ${h.speed_kmh>1?`<span style="font-size:.72rem;opacity:.5;margin-left:8px">${h.speed_kmh} km/h</span>`:''}
       </div>
-      <a href="${h.url}" download style="color:#fff;font-size:.68rem;font-weight:700;text-decoration:none;border:1px solid var(--border);padding:4px 9px;border-radius:6px" onclick="e=>e.stopPropagation()">SAVE</a>
+      <a href="${h.url}" download style="color:#fff;font-size:.68rem;font-weight:700;text-decoration:none;border:1px solid var(--border);padding:4px 9px;border-radius:6px" onclick="event.stopPropagation()">SAVE</a>
     </div>`;
   return c;
 }
 
-function dropBad(e){
-  const url=e.dataTransfer.getData('text/plain');
-  const reel=document.getElementById('reel-bad');
-  // find the card in good reel and move it
-  document.querySelectorAll('.clip-card').forEach(c=>{
-    if(c.dataset.url===url && c.closest('#reel-good')){
-      const clone=c.cloneNode(true);
-      clone.querySelector('.clip-tag').className='clip-tag tag-bad';
-      clone.querySelector('.clip-tag').innerText='보완 필요';
-      clone.onclick=()=>{ const v=document.getElementById('main-vid'); v.src=url; v.play().catch(()=>{}); };
-      reel.appendChild(clone);
-      c.remove();
-    }
-  });
-}
 
 function dlCard(){
   const p=tryJSON(sessionStorage.getItem('profile'))||{};

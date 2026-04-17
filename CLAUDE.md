@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 모델 사용 규칙
+
+| 용도 | 모델 |
+|------|------|
+| 단순 작업 (파일 읽기/쓰기, 간단한 수정) | Haiku |
+| 기본 개발 (기능 구현, 버그 수정, 코드 리뷰) | Sonnet |
+| 아키텍처 설계 (시스템 설계, 대형 리팩터링 결정) | Opus |
+| Planner (계획 수립, 설계 검토) | Opus |
+| Worker (계획 실행, 반복 작업) | Haiku |
+
 ## 브리프 규칙
 1. 요청이 불완전하면 작업 전에 반드시 질문한다
 2. 폴더가 없으면 자동 생성 (`mkdir -p`)

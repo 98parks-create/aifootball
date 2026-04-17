@@ -169,80 +169,220 @@ class FootballAnalyzer:
             report['scouting_note'] = "데이터 축적을 통해 성장 궤적을 추적하겠습니다."
         return report
 
-    # ── Event Detection ───────────────────────────────────────────────────────
+    # ── Position-aware Event Detection ───────────────────────────────────────
 
-    def _detect_events(self, tracks, target_id, ball_dict, fps=25):
-        """
-        모든 볼 터치(proximity < 3m) 클립 + 스프린트 이벤트.
-        볼 터치는 전부 추출 (최소 간격 4초).
-        이벤트마다 점수: 볼 터치 > 스프린트 > 활동량.
-        """
+    def _detect_events_by_position(self, tracks, target_id, ball_dict, fps=25, position="ST"):
+        pos = position.upper()
+        is_fwd = any(p in pos for p in ["ST","CF","LW","RW","SS","FW","CAM","AM"])
+        is_mid = (any(p in pos for p in ["MF","CM","DM","CDM"]) and not is_fwd)
+        is_def = (any(p in pos for p in ["CB","LB","RB","WB","SW","DF","GK"])
+                  or not (is_fwd or is_mid))
+
         target_tracks = tracks[target_id]
         if len(target_tracks) < 2:
             return []
 
+        target_by_frame = {t['frame']: t for t in target_tracks}
         speed_map = self._build_speed_map(target_tracks, fps)
-        events = []
-        min_gap = int(fps * 4)   # 4초 간격 (볼터치는 촘촘하게)
-        last_touch = -min_gap
-        last_sprint = -int(fps * 8)
 
-        # ── 볼 터치 이벤트 (핵심) ──────────────────────────────────────────
+        # Ball velocity map (km/h)
+        ball_frames = sorted(ball_dict.keys())
+        ball_speed = {}
+        for i in range(1, len(ball_frames)):
+            f = ball_frames[i]
+            p1, p2 = ball_dict[ball_frames[i-1]], ball_dict[f]
+            dx = (p2[0]-p1[0]) * SCALE_X
+            dy = (p2[1]-p1[1]) * SCALE_Y
+            ball_speed[f] = np.sqrt(dx**2+dy**2) * fps * 3.6
+
+        # Other players by frame (opponents + teammates, can't distinguish without team labels)
+        others_by_frame = {}
+        for tid, data in tracks.items():
+            if tid == target_id: continue
+            for t in data:
+                if t.get('class') != 0: continue
+                f = t['frame']
+                if f not in others_by_frame: others_by_frame[f] = []
+                others_by_frame[f].append(t['pos'])
+
+        events = []
+        min_gap = int(fps * 4)
+
+        def conflict(f):
+            return any(abs(f - e['frame']) < min_gap for e in events)
+
+        # ── 1. GOAL (볼이 골 구역 진입) ──────────────────────────────────
+        for f in ball_frames:
+            bx, by = ball_dict[f]
+            if not ((bx < 4 or bx > 96) and 18 < by < 32):
+                continue
+            # 볼이 빠르게 들어왔는지 확인
+            fast = any(ball_speed.get(f-k, 0) > 25 for k in range(1, int(fps*0.5)))
+            if not fast: continue
+            # 타겟이 2초 내에 볼을 터치했는지 확인
+            for k in range(int(fps*2)):
+                fb = f - k
+                if fb in target_by_frame and fb in ball_dict:
+                    d = np.hypot(target_by_frame[fb]['pos'][0]-ball_dict[fb][0],
+                                 target_by_frame[fb]['pos'][1]-ball_dict[fb][1])
+                    if d < 4 and not conflict(f):
+                        events.append({"frame": f, "category": "GOAL", "score": 3000,
+                                       "speed_kmh": 0, "section": "attack"})
+                        break
+
+        # ── 2. Touch-based events ────────────────────────────────────────
         for t in target_tracks:
             f = t['frame']
-            if f not in ball_dict:
-                continue
-            p = t.get('pos', [0,0])
-            dist = np.hypot(p[0]-ball_dict[f][0], p[1]-ball_dict[f][1])
-            if dist < 3.0 and f - last_touch > min_gap:
-                spd = speed_map.get(f, 0)
-                # 볼 터치 중 속도로 카테고리 분류
-                if spd > 14:
-                    cat = "Dribble"      # 뛰면서 볼 터치 = 드리블
-                else:
-                    cat = "Ball Touch"   # 정지/저속 = 패스/수비/트랩
-                events.append({
-                    "frame": f,
-                    "category": cat,
-                    "score": 300 - dist * 10,
-                    "speed_kmh": round(spd, 1),
-                })
-                last_touch = f
+            if f not in ball_dict or conflict(f): continue
+            tp = t.get('pos', [0,0])
+            bp = ball_dict[f]
+            dist = np.hypot(tp[0]-bp[0], tp[1]-bp[1])
+            if dist > 3.0: continue
 
-        # ── 스프린트 이벤트 (볼 없을 때) ─────────────────────────────────
+            spd   = speed_map.get(f, 0)
+            field_x = tp[0]
+            in_att  = field_x > 66 or field_x < 34   # 공격/수비 1/3
+            in_mid  = 34 <= field_x <= 66
+
+            # 볼이 터치 후 얼마나 이동하는가
+            future_ball = [ball_dict[f+k] for k in range(1, int(fps*1.2)) if f+k in ball_dict]
+            ball_traveled_m = 0
+            if future_ball:
+                dx = (future_ball[-1][0]-bp[0]) * SCALE_X
+                dy = (future_ball[-1][1]-bp[1]) * SCALE_Y
+                ball_traveled_m = np.sqrt(dx**2+dy**2)
+
+            bspd_after = max((ball_speed.get(f+k,0) for k in range(1,int(fps*0.5)) if f+k in ball_speed), default=0)
+            bspd_before = max((ball_speed.get(f-k,0) for k in range(1,int(fps*0.4)) if f-k in ball_speed), default=0)
+
+            # 근처에 다른 선수가 있었나 (태클/수비 상황)
+            contested = any(
+                np.hypot(op[0]-bp[0], op[1]-bp[1]) < 4.0
+                for op in others_by_frame.get(f, [])
+            )
+            opp_had_ball = any(
+                np.hypot(op[0]-ball_dict.get(f-k,bp)[0], op[1]-ball_dict.get(f-k,bp)[1]) < 2.5
+                for k in range(1, int(fps*0.8))
+                for op in others_by_frame.get(f-k, [])
+                if f-k in ball_dict
+            )
+
+            # 지속 드리블 여부 (이전 0.5초 동안 볼 유지)
+            sustained = sum(
+                1 for k in range(1, int(fps*0.6))
+                if f-k in ball_dict and f-k in target_by_frame
+                and np.hypot(target_by_frame[f-k]['pos'][0]-ball_dict[f-k][0],
+                             target_by_frame[f-k]['pos'][1]-ball_dict[f-k][1]) < 3.0
+            ) >= int(fps * 0.25)
+
+            # ── SHOT (공격수/미드) ────────────────────────────────────
+            if (is_fwd or is_mid) and in_att and bspd_after > 40:
+                toward_goal = future_ball and (future_ball[-1][0] < 8 or future_ball[-1][0] > 92)
+                if toward_goal or bspd_after > 70:
+                    events.append({"frame": f, "category": "SHOT", "score": 1800,
+                                   "speed_kmh": round(spd,1), "section": "attack"})
+                    continue
+
+            # ── TACKLE (수비수: 상대가 볼 보유 → 탈취) ────────────────
+            if is_def and opp_had_ball and spd > 6:
+                events.append({"frame": f, "category": "TACKLE", "score": 1500,
+                               "speed_kmh": round(spd,1), "section": "defense"})
+                continue
+
+            # ── INTERCEPTION (미드/수비: 패스 가로채기) ────────────────
+            if (is_def or is_mid) and opp_had_ball and bspd_before > 20 and spd < 10:
+                events.append({"frame": f, "category": "INTERCEPTION", "score": 1400,
+                               "speed_kmh": round(spd,1), "section": "defense"})
+                continue
+
+            # ── CLEARANCE (수비수: 수비 1/3에서 강한 킥) ──────────────
+            if is_def and in_att and ball_traveled_m > 18 and bspd_after > 30:
+                events.append({"frame": f, "category": "CLEARANCE", "score": 1200,
+                               "speed_kmh": round(spd,1), "section": "defense"})
+                continue
+
+            # ── DRIBBLE (공격수/미드: 지속 드리블) ────────────────────
+            if (is_fwd or is_mid) and sustained and spd > 10:
+                events.append({"frame": f, "category": "DRIBBLE", "score": 1000,
+                               "speed_kmh": round(spd,1), "section": "attack"})
+                continue
+
+            # ── LONG PASS / THROUGH BALL ───────────────────────────────
+            if ball_traveled_m > 20 and bspd_after > 30:
+                cat = "THROUGH BALL" if is_fwd and in_mid else "LONG PASS"
+                events.append({"frame": f, "category": cat, "score": 750,
+                               "speed_kmh": round(spd,1), "section": "attack" if is_fwd else "midfield"})
+                continue
+
+            # ── SHORT PASS ─────────────────────────────────────────────
+            if ball_traveled_m > 5 and bspd_after > 15 and spd < 14:
+                events.append({"frame": f, "category": "PASS", "score": 500,
+                               "speed_kmh": round(spd,1), "section": "midfield"})
+                continue
+
+            # ── BALL CONTROL (볼 받기) ──────────────────────────────────
+            if bspd_before > 20 and dist < 2.0:
+                events.append({"frame": f, "category": "CONTROL", "score": 350,
+                               "speed_kmh": round(spd,1), "section": "midfield"})
+                continue
+
+            # ── Generic touch (볼 터치 - 전부 클립 추출) ──────────────
+            events.append({"frame": f, "category": "BALL TOUCH", "score": 250,
+                           "speed_kmh": round(spd,1),
+                           "section": "defense" if is_def else "attack" if is_fwd else "midfield"})
+
+        # ── 3. BALL LOST (볼 손실 감지) ──────────────────────────────────
+        for t in target_tracks:
+            f = t['frame']
+            if f not in ball_dict: continue
+            d = np.hypot(t['pos'][0]-ball_dict[f][0], t['pos'][1]-ball_dict[f][1])
+            if d > 2.5: continue
+            # 이후 다른 선수가 볼을 가져가는지 확인
+            for k in range(1, int(fps*1.5)):
+                nf = f+k
+                if nf not in ball_dict: continue
+                if nf in target_by_frame:
+                    nd = np.hypot(target_by_frame[nf]['pos'][0]-ball_dict[nf][0],
+                                  target_by_frame[nf]['pos'][1]-ball_dict[nf][1])
+                    if nd < 3: break   # 볼 유지
+                opp_got = any(
+                    np.hypot(op[0]-ball_dict[nf][0], op[1]-ball_dict[nf][1]) < 2.5
+                    for op in others_by_frame.get(nf, [])
+                )
+                if opp_got and not conflict(nf):
+                    events.append({"frame": nf, "category": "BALL LOST", "score": 100,
+                                   "speed_kmh": 0, "section": "bad"})
+                    break
+
+        # ── 4. Sprint ────────────────────────────────────────────────────
+        last_sp = -int(fps*8)
         for i in range(1, len(target_tracks)):
             f = target_tracks[i]['frame']
             spd = speed_map.get(f, 0)
-            if spd > 22 and f - last_sprint > int(fps * 8) and f not in ball_dict:
-                events.append({
-                    "frame": f,
-                    "category": "Sprint Run",
-                    "score": spd * 1.5,
-                    "speed_kmh": round(spd, 1),
-                })
-                last_sprint = f
+            if spd > 22 and f - last_sp > int(fps*8) and not conflict(f):
+                events.append({"frame": f, "category": "SPRINT", "score": 300,
+                               "speed_kmh": round(spd,1), "section": "midfield"})
+                last_sp = f
 
-        # ── 활동량 보완 (이벤트가 5개 미만일 때) ──────────────────────────
+        # ── 5. Fallback ──────────────────────────────────────────────────
         if len(events) < 5:
-            win = int(fps * 6)
-            for i in range(0, len(target_tracks) - win, win):
-                f = target_tracks[i + win//2]['frame']
-                if any(abs(f - e['frame']) < fps*6 for e in events):
-                    continue
-                seg = sum(
-                    self._speed_kmh(target_tracks[j-1]['pos'], target_tracks[j]['pos'], fps)
-                    for j in range(i+1, min(i+win, len(target_tracks)))
-                    if self._speed_kmh(target_tracks[j-1]['pos'], target_tracks[j]['pos'], fps) < 40
-                )
-                events.append({"frame": f, "category": "Active Play", "score": seg, "speed_kmh": 0})
+            win = int(fps*6)
+            for i in range(0, len(target_tracks)-win, win):
+                f = target_tracks[i+win//2]['frame']
+                if conflict(f): continue
+                seg = sum(self._speed_kmh(target_tracks[j-1]['pos'], target_tracks[j]['pos'], fps)
+                          for j in range(i+1, min(i+win, len(target_tracks)))
+                          if self._speed_kmh(target_tracks[j-1]['pos'], target_tracks[j]['pos'], fps) < 40)
+                events.append({"frame": f, "category": "ACTIVE PLAY", "score": seg,
+                               "speed_kmh": 0, "section": "midfield"})
 
-        events = sorted(events, key=lambda x: x['score'], reverse=True)[:15]
+        events = sorted(events, key=lambda x: x['score'], reverse=True)[:20]
         events = sorted(events, key=lambda x: x['frame'])
         return events
 
     # ── Clip extraction ───────────────────────────────────────────────────────
 
-    def extract_combined_highlights(self, video_path, tracks, target_id, fps=25):
+    def extract_combined_highlights(self, video_path, tracks, target_id, fps=25, position="ST"):
         if target_id not in tracks:
             return [], []
         try:
@@ -257,7 +397,7 @@ class FootballAnalyzer:
                        if data and data[0].get('class') == 32 for t in data]
         ball_dict = {b['frame']: b['pos'] for b in ball_tracks}
 
-        events = self._detect_events(tracks, target_id, ball_dict, fps)
+        events = self._detect_events_by_position(tracks, target_id, ball_dict, fps, position)
 
         pre  = int(fps * 3)
         post = int(fps * 3)
@@ -273,6 +413,7 @@ class FootballAnalyzer:
                 highlights.append({
                     "url": f"/static/highlights/{clip_name}",
                     "category": ev['category'],
+                    "section": ev.get("section", "midfield"),
                     "frame": int(ev['frame']),
                     "speed_kmh": ev.get("speed_kmh", 0),
                 })
