@@ -208,31 +208,58 @@ def analyze():
 
     def run():
         try:
-            def cb(p): processing_progress[sid] = {"percent": int(p), "status": "analyzing"}
+            # Stage-1: 480p 빠른 스캔 (0 → 65%)
+            def cb_scan(p):
+                processing_progress[sid] = {
+                    "percent":   int(p * 0.65),
+                    "status":    "analyzing",
+                    "stage_msg": f"1단계 — 480p 빠른 스캔 중 ({int(p)}%)",
+                }
 
             det = FootballDetector('models/yolov8s.pt')
-            out_v = os.path.join(PROC_DIR, f"{sid}_analyzed.mp4")
-            res   = det.process_video_v2(sess['video_path'], out_v, pts, target, progress_callback=cb)
+            res = det.process_video_v2(
+                sess['video_path'], None, pts, target, progress_callback=cb_scan)
 
-            cap = cv2.VideoCapture(sess['video_path'])
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25
-            cap.release()
+            fps = res.get('fps', 25)
 
-            stats      = det.analyzer.calculate_individual_stats(
-                            det.player_tracks, res['target_track_id'],
-                            position=sess.get('position','ST'), fps=fps)
+            # Stage-2: 이벤트 감지 (65%)
+            processing_progress[sid] = {
+                "percent": 65, "status": "analyzing",
+                "stage_msg": "2단계 — 이벤트 감지 중...",
+            }
+            stats = det.analyzer.calculate_individual_stats(
+                det.player_tracks, res['target_track_id'],
+                position=sess.get('position','ST'), fps=fps)
+
+            # Stage-2: 클립 추출 (65 → 80%)
+            processing_progress[sid] = {
+                "percent": 68, "status": "analyzing",
+                "stage_msg": "2단계 — 하이라이트 클립 추출 중...",
+            }
             highlights, events = det.analyzer.extract_combined_highlights(
-                            sess['video_path'], det.player_tracks,
-                            res['target_track_id'], fps=fps,
-                            position=sess.get('position','ST'),
-                            target_team=res.get('target_team', -1))
+                sess['video_path'], det.player_tracks,
+                res['target_track_id'], fps=fps,
+                position=sess.get('position','ST'),
+                target_team=res.get('target_team', -1),
+                player_name=sess.get('player_name','PLAYER'))
+
+            # Stage-2: 마스터 릴 (80 → 95%)
+            processing_progress[sid] = {
+                "percent": 82, "status": "analyzing",
+                "stage_msg": "2단계 — 마스터 하이라이트 영상 생성 중...",
+            }
             master_url = det.analyzer.generate_master_sizzle_reel(
-                            sess['video_path'], events, det.player_tracks,
-                            res['target_track_id'], sid,
-                            player_name=sess.get('player_name','PLAYER'))
-            heatmap_url= det.analyzer.generate_pitch_heatmap(
-                            det.player_tracks, res['target_track_id'], sid)
-            ai_comment = det.analyzer.generate_ai_comment(stats)
+                sess['video_path'], events, det.player_tracks,
+                res['target_track_id'], sid,
+                player_name=sess.get('player_name','PLAYER'))
+
+            processing_progress[sid] = {
+                "percent": 95, "status": "analyzing",
+                "stage_msg": "2단계 — 히트맵 & 리포트 생성 중...",
+            }
+            heatmap_url = det.analyzer.generate_pitch_heatmap(
+                det.player_tracks, res['target_track_id'], sid)
+            ai_comment  = det.analyzer.generate_ai_comment(stats)
 
             if not master_url:
                 processing_progress[sid] = {

@@ -1,0 +1,7 @@
+tracker_type: bytetrack
+track_high_thresh: 0.5      # 1차 매칭 임계값
+track_low_thresh: 0.1       # 2차 매칭 임계값
+new_track_thresh: 0.6       # 새 트랙 생성 임계값
+track_buffer: 60            # 최대 60프레임(~2초) 트랙 유지 (화면 밖 복귀 대응)
+match_thresh: 0.8           # IoU 매칭 임계값
+fuse_score: true            # 신뢰도 점수와 IoU 거리 융합

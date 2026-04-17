@@ -192,12 +192,23 @@ class FootballAnalyzer:
         avg = float(np.mean(speeds)) if speeds else 0
         km  = dist_m / 1000
 
-        sprint_count, in_sprint = 0, False
-        for s in speeds:
-            if not in_sprint and s >= 20.0:
-                in_sprint = True; sprint_count += 1
-            elif in_sprint and s < 15.0:
+        # 스프린트 기준: 7 m/s (25.2 km/h) 이상, 0.5초(fps*0.5 프레임) 지속
+        SPRINT_ENTRY = 7.0 * 3.6   # 25.2 km/h
+        SPRINT_EXIT  = 5.5 * 3.6   # 19.8 km/h (이력 기준)
+        MIN_SPRINT_F = max(1, int(fps * 0.5))
+        sprint_count, in_sprint, sprint_start_f = 0, False, 0
+        for f, s in sorted(speed_map.items()):
+            if not in_sprint and s >= SPRINT_ENTRY:
+                in_sprint = True
+                sprint_start_f = f
+            elif in_sprint and s < SPRINT_EXIT:
+                if f - sprint_start_f >= MIN_SPRINT_F:
+                    sprint_count += 1
                 in_sprint = False
+        if in_sprint:
+            last_f = max(speed_map.keys(), default=sprint_start_f)
+            if last_f - sprint_start_f >= MIN_SPRINT_F:
+                sprint_count += 1
 
         pos = position.upper()
         pac = min(99, max(55, int(top * 2.8)))

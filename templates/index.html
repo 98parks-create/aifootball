@@ -231,6 +231,7 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
   <p style="opacity:.55;margin-bottom:36px">정밀 분석 진행 중...</p>
   <div class="pbar-wrap"><div id="pbar"></div></div>
   <div id="p-pct" style="font-size:1.8rem;font-weight:900;margin-top:8px">0%</div>
+  <div id="p-stage" style="color:var(--gold);font-weight:700;margin-top:8px;font-size:.95rem">준비 중...</div>
   <div id="p-eta" style="opacity:.45;margin-top:6px;font-size:.88rem">예상 시간 계산 중...</div>
 </div>
 
@@ -358,6 +359,7 @@ function pollProgress(){
       const pct=d.percent||0;
       document.getElementById('pbar').style.width=pct+'%';
       document.getElementById('p-pct').innerText=pct+'%';
+      if(d.stage_msg) document.getElementById('p-stage').innerText=d.stage_msg;
       const el=(Date.now()-t0)/1000;
       if(pct>5){ const rem=Math.max(0,Math.round((el/pct)*(100-pct))); document.getElementById('p-eta').innerText=`약 ${rem}초 남음`; }
       if(d.status==='completed'){ clearInterval(pInterval); fetchResult(); }
