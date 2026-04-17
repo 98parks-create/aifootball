@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 모델 파일 (용량 큼)
+models/*.pt
+*.pt
+
+# 데이터 & 분석 결과 (외부 저장소)
+data/uploads/
+data/processed/
+data/analysis_history.json
+static/highlights/
+static/calibration/
+static/videos/
+
+# 분석 중간 결과
+data/analysis/
+
+# 환경 변수
+.env
+
+# OS
+.DS_Store
+Thumbs.db
