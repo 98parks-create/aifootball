@@ -6,13 +6,25 @@ from ultralytics import YOLO
 from src.transformer import ViewTransformer
 from src.analyzer import FootballAnalyzer
 
+try:
+    import torch
+    _DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+except ImportError:
+    _DEVICE = 'cpu'
+
+print(f"[TAD] Device: {_DEVICE}")
+
+# Unified target track is stored under this key in player_tracks
+UNIFIED_TARGET_ID = -1
+
 
 class FootballDetector:
     def __init__(self, model_path='models/yolov8s.pt'):
         self.model = YOLO(model_path)
+        self.model.to(_DEVICE)
         self.analyzer = FootballAnalyzer()
         self.player_tracks = {}
-        self._target_hist = None       # jersey color histogram for re-ID
+        self._target_hist = None
         self._target_hist_count = 0
 
     # ── Appearance Re-ID ─────────────────────────────────────────────────────
@@ -102,10 +114,14 @@ class FootballDetector:
             out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (W, H))
 
         target_id = None
-        last_px = None          # last known pixel centre of target
+        last_px = None
         frames_lost = 0
-        PROXY_WIN = int(fps * 2)     # 2s position-based recovery window
-        APPEAR_WIN = int(fps * 4)    # 4s → try appearance re-ID
+        PROXY_WIN = int(fps * 2)
+        APPEAR_WIN = int(fps * 4)
+
+        # Unified target track — accumulates ALL frames where target is found,
+        # regardless of tracker ID changes (re-locks, camera cuts, etc.)
+        target_frames = []
 
         idx = 0
         while cap.isOpened():
@@ -117,19 +133,18 @@ class FootballDetector:
                 progress_callback((idx / total_frames) * 100)
 
             try:
-                # YOLOv8 built-in tracking (persist=True keeps Kalman state across frames)
                 results = self.model.track(
                     frame, persist=True, conf=0.2,
                     classes=[0, 32], verbose=False
                 )[0]
                 dets = sv.Detections.from_ultralytics(results)
 
-                # filter unassigned detections
                 if dets.tracker_id is not None:
                     valid = dets.tracker_id != -1
                     dets = dets[valid]
 
                 found = False
+                found_i = None   # index in dets of the confirmed target this frame
 
                 if len(dets) > 0 and dets.tracker_id is not None:
 
@@ -137,16 +152,16 @@ class FootballDetector:
                     if target_id is not None:
                         where = np.where(dets.tracker_id == target_id)[0]
                         if len(where):
-                            i = where[0]
-                            xyxy = dets.xyxy[i]
+                            found_i = where[0]
+                            xyxy = dets.xyxy[found_i]
                             last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
                             self._update_target_hist(frame, xyxy)
                             found = True
                             frames_lost = 0
 
-                    # ── 2. Position-based recovery (< 2s gap, < 220px) ───
+                    # ── 2. Position-based recovery (< 2s, < 200px) ───────
                     if not found and last_px is not None and frames_lost < PROXY_WIN:
-                        best_i, best_d = None, 220.0
+                        best_i, best_d = None, 200.0
                         for i in range(len(dets)):
                             if dets.class_id[i] != 0:
                                 continue
@@ -158,6 +173,7 @@ class FootballDetector:
                                 best_d, best_i = d, i
                         if best_i is not None:
                             target_id = int(dets.tracker_id[best_i])
+                            found_i = best_i
                             xyxy = dets.xyxy[best_i]
                             last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
                             self._update_target_hist(frame, xyxy)
@@ -170,6 +186,7 @@ class FootballDetector:
                         best_i = self._best_appearance_match(frame, dets, threshold=0.40)
                         if best_i is not None:
                             target_id = int(dets.tracker_id[best_i])
+                            found_i = best_i
                             xyxy = dets.xyxy[best_i]
                             last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
                             self._update_target_hist(frame, xyxy)
@@ -177,7 +194,7 @@ class FootballDetector:
                             frames_lost = 0
                             print(f"[TAD] Appearance re-lock f={idx} id={target_id}")
 
-                    # ── 4. Initial lock (first frame encounter) ───────────
+                    # ── 4. Initial lock ───────────────────────────────────
                     if target_id is None:
                         best_i, best_d = None, 140.0
                         for i in range(len(dets)):
@@ -185,12 +202,13 @@ class FootballDetector:
                                 continue
                             xyxy = dets.xyxy[i]
                             cx = (xyxy[0]+xyxy[2])/2
-                            cy = xyxy[3]  # bottom-centre for foot position
+                            cy = xyxy[3]
                             d = np.hypot(cx - target_player_id['x'], cy - target_player_id['y'])
                             if d < best_d:
                                 best_d, best_i = d, i
                         if best_i is not None:
                             target_id = int(dets.tracker_id[best_i])
+                            found_i = best_i
                             xyxy = dets.xyxy[best_i]
                             last_px = [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2]
                             self._update_target_hist(frame, xyxy)
@@ -201,8 +219,8 @@ class FootballDetector:
                         frames_lost += 1
 
                     # ── Store all tracks ──────────────────────────────────
-                    pts = dets.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
-                    tpts = transformer.transform_points(pts)
+                    anchor_pts = dets.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+                    tpts = transformer.transform_points(anchor_pts)
                     for i in range(len(dets)):
                         if dets.tracker_id[i] is None or dets.tracker_id[i] == -1:
                             continue
@@ -216,6 +234,18 @@ class FootballDetector:
                             "pos_px": [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
                             "class": int(dets.class_id[i]),
                             "conf": float(dets.confidence[i]) if dets.confidence is not None else 0.5,
+                            "bbox": xyxy.tolist(),
+                        })
+
+                    # ── Append to unified target track ────────────────────
+                    if found and found_i is not None:
+                        xyxy = dets.xyxy[found_i]
+                        target_frames.append({
+                            "frame": idx,
+                            "pos": tpts[found_i].tolist(),
+                            "pos_px": [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
+                            "class": 0,
+                            "conf": float(dets.confidence[found_i]) if dets.confidence is not None else 0.5,
                             "bbox": xyxy.tolist(),
                         })
 
@@ -246,12 +276,16 @@ class FootballDetector:
 
         cap.release()
         out.release()
-        print(f"[TAD] Done. target_id={target_id}, players tracked={len(self.player_tracks)}")
+
+        # Store unified target track under a fixed key so all downstream
+        # functions (stats, highlights, heatmap) always use the complete trajectory
+        self.player_tracks[UNIFIED_TARGET_ID] = target_frames
+        print(f"[TAD] Done. target_id={target_id}, unified_frames={len(target_frames)}, players_tracked={len(self.player_tracks)}")
 
         stats = self.analyzer.calculate_individual_stats(
-            self.player_tracks, target_id, fps=fps
+            self.player_tracks, UNIFIED_TARGET_ID, fps=fps
         )
         return {
             "stats": stats,
-            "target_track_id": int(target_id) if target_id is not None else None,
+            "target_track_id": UNIFIED_TARGET_ID,
         }

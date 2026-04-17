@@ -42,16 +42,29 @@ class FootballAnalyzer:
         return np.sqrt(dx**2+dy**2) * fps * 3.6
 
     def _build_speed_map(self, target_tracks, fps):
-        """Per-frame speed (km/h), noise-filtered."""
-        sm = {}
+        """Per-frame speed (km/h), noise-filtered and smoothed."""
+        frames, raw = [], []
         for i in range(1, len(target_tracks)):
-            f = target_tracks[i]['frame']
             spd = self._speed_kmh(target_tracks[i-1]['pos'], target_tracks[i]['pos'], fps)
-            if spd < 40:
-                sm[f] = spd
-        return sm
+            if spd < 38.0:
+                frames.append(target_tracks[i]['frame'])
+                raw.append(spd)
+        smoothed = self._smooth_speeds(raw, window=5)
+        return {f: s for f, s in zip(frames, smoothed)}
 
     # ── Stats ─────────────────────────────────────────────────────────────────
+
+    def _smooth_speeds(self, speeds, window=5):
+        """Rolling mean to suppress detection jitter."""
+        if len(speeds) < window:
+            return speeds
+        result = []
+        half = window // 2
+        for i in range(len(speeds)):
+            lo = max(0, i - half)
+            hi = min(len(speeds), i + half + 1)
+            result.append(float(np.mean(speeds[lo:hi])))
+        return result
 
     def calculate_individual_stats(self, tracks, target_id, position="ST", fps=25):
         empty = {"PAC":50,"PHY":50,"DRI":50,"PAS":50,"SHO":50,
@@ -61,19 +74,30 @@ class FootballAnalyzer:
 
         data = tracks[target_id]
         positions = [t['pos'] for t in data]
-        dist_m, speeds = 0.0, []
+        dist_m, raw_speeds = 0.0, []
         for i in range(1, len(positions)):
             spd = self._speed_kmh(positions[i-1], positions[i], fps)
             if spd < 40:
                 dx = (positions[i][0]-positions[i-1][0]) * SCALE_X
                 dy = (positions[i][1]-positions[i-1][1]) * SCALE_Y
                 dist_m += np.sqrt(dx**2+dy**2)
-                speeds.append(spd)
+                raw_speeds.append(spd)
 
-        top = max(speeds) if speeds else 0
+        speeds = self._smooth_speeds(raw_speeds)
+        top = min(max(speeds) if speeds else 0, 38.0)  # physical cap (world record ~36 km/h)
         avg = float(np.mean(speeds)) if speeds else 0
         km  = dist_m / 1000
-        sprints = sum(1 for s in speeds if s > 20)
+
+        # State machine: sprint starts at >= 20 km/h, ends at < 15 km/h
+        sprint_count = 0
+        in_sprint = False
+        for s in speeds:
+            if not in_sprint and s >= 20.0:
+                in_sprint = True
+                sprint_count += 1
+            elif in_sprint and s < 15.0:
+                in_sprint = False
+        sprints = sprint_count
 
         pos = position.upper()
         pac = min(99, max(55, int(top * 2.8)))
@@ -464,27 +488,33 @@ class FootballAnalyzer:
                 hf, wf = frame.shape[:2]
 
                 raw = tracks.get(fi)
-                cx = float(raw[0]) if raw is not None else wf/2
-                cy = float(raw[1]) if raw is not None else hf/2
-                if lx is not None:
-                    cx = lx*0.85 + cx*0.15
-                    cy = ly*0.85 + cy*0.15
-                lx, ly = cx, cy
+                if raw is not None:
+                    cx = float(raw[0])
+                    cy = float(raw[1])
+                    if lx is not None:
+                        cx = lx * 0.7 + cx * 0.3
+                        cy = ly * 0.7 + cy * 0.3
+                    lx, ly = cx, cy
+                else:
+                    cx = lx if lx is not None else wf / 2
+                    cy = ly if ly is not None else hf / 2
 
-                cs = min(wf, hf, 960)
-                x1 = int(max(0, min(wf-cs, cx-cs/2)))
-                y1 = int(max(0, min(hf-cs, cy-cs/2)))
-                res = cv2.resize(frame[y1:y1+cs, x1:x1+cs], (ow, oh),
-                                 interpolation=cv2.INTER_LANCZOS4)
+                # Full frame — no crop/zoom
+                res = cv2.resize(frame, (ow, oh), interpolation=cv2.INTER_LANCZOS4)
+
+                # Draw target ring at player position (scaled to output size)
+                sx = int(cx * ow / wf)
+                sy = int(cy * oh / hf)
+                cv2.circle(res, (sx, sy), 38, (0, 215, 255), 3)
+                cv2.circle(res, (sx, sy), 5,  (0, 215, 255), -1)
 
                 prog = (fi - start_f) / total
                 if prog < 0.1:
-                    res = (res * (prog/0.1)).astype(np.uint8)
+                    res = (res * (prog / 0.1)).astype(np.uint8)
                 elif prog > 0.9:
-                    res = (res * ((1-prog)/0.1)).astype(np.uint8)
+                    res = (res * ((1 - prog) / 0.1)).astype(np.uint8)
 
-                # Overlays (ASCII only)
-                cv2.putText(res, "TAD AI", (24,38),
+                cv2.putText(res, "TAD AI", (24, 38),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.85, (220,40,40), 2, cv2.LINE_AA)
                 cv2.putText(res, cat, (24, oh-28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,215,0), 2, cv2.LINE_AA)
@@ -493,10 +523,8 @@ class FootballAnalyzer:
                     cv2.putText(res, spd_s, (ow-sw-24, oh-28),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2, cv2.LINE_AA)
 
-                # Slow-mo at event peak (middle 30%)
                 if is_act and 0.35 < prog < 0.65:
-                    out.write(res)
-
+                    out.write(res)  # duplicate frame for slow-mo effect
                 out.write(res)
 
             cap.release(); out.release()
@@ -543,24 +571,32 @@ class FootballAnalyzer:
                 cat   = _safe(ev.get('category','HIGHLIGHT')).upper()
                 spd_v = ev.get('speed_kmh', 0)
                 spd_s = f"{spd_v:.0f} KM/H" if spd_v > 1 else ""
-                is_act = ev.get('category') in ('Ball Touch','Dribble','Sprint Run')
+                is_act = ev.get('category') in ('BALL TOUCH','DRIBBLE','SPRINT')
 
                 for fi in range(sf, ef):
                     ret, frame = cap.read()
                     if not ret: break
                     hf, wf = frame.shape[:2]
-                    raw = target_dict.get(fi)
-                    cx = float(raw[0]) if raw is not None else wf/2
-                    cy = float(raw[1]) if raw is not None else hf/2
-                    if lx is not None:
-                        cx = lx*0.85+cx*0.15; cy = ly*0.85+cy*0.15
-                    lx, ly = cx, cy
 
-                    cs = min(wf, hf, 960)
-                    x1 = int(max(0, min(wf-cs, cx-cs/2)))
-                    y1 = int(max(0, min(hf-cs, cy-cs/2)))
-                    res = cv2.resize(frame[y1:y1+cs, x1:x1+cs], (ow, oh),
-                                     interpolation=cv2.INTER_LANCZOS4)
+                    raw = target_dict.get(fi)
+                    if raw is not None:
+                        cx = float(raw[0])
+                        cy = float(raw[1])
+                        if lx is not None:
+                            cx = lx*0.7+cx*0.3; cy = ly*0.7+cy*0.3
+                        lx, ly = cx, cy
+                    else:
+                        cx = lx if lx is not None else wf/2
+                        cy = ly if ly is not None else hf/2
+
+                    # Full frame — no crop/zoom
+                    res = cv2.resize(frame, (ow, oh), interpolation=cv2.INTER_LANCZOS4)
+
+                    # Target ring
+                    sx = int(cx * ow / wf)
+                    sy = int(cy * oh / hf)
+                    cv2.circle(res, (sx, sy), 38, (0, 215, 255), 3)
+                    cv2.circle(res, (sx, sy), 5,  (0, 215, 255), -1)
 
                     prog = (fi-sf)/total
                     if prog < 0.08:
