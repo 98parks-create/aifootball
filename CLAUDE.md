@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 브리프 규칙
+1. 요청이 불완전하면 작업 전에 반드시 질문한다
+2. 폴더가 없으면 자동 생성 (`mkdir -p`)
+3. 파일명은 날짜_내용 형식으로 (예: `20260417_feature.md`)
+4. 모든 말은 한국어로 한다
+
 ## 개발자
 - 이름: 인서 (Inseo Park) — 주니어 개발자, Python 기초 수준
 - OS: Windows
@@ -69,3 +75,4 @@ aifootball/
 
 ## 작업 이력
 - 2026-04-17: 초기 구조 정리 — ABOUT-ME/PROJECT/DOCS/RESULT 폴더 생성, models/ 폴더 분리, .gitignore 추가, 모델 경로 `models/yolov8s.pt`로 통일
+- 2026-04-17: 품질 대형 업그레이드 — analyzer.py 전체 재작성 (실제 km/h 계산, 스프린트 감지, 타이틀카드/페이드/슬로우모션 영상), app.py 비동기 처리(threading + /results 엔드포인트), index.html 폴링 방식 전환, flask-cors 의존성 추가

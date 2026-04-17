@@ -1,9 +1,10 @@
 ultralytics
 opencv-python
 flask
+flask-cors
 pandas
 numpy
 matplotlib
 supervision
-roboflow
+scipy
 requests
