@@ -224,7 +224,8 @@ def analyze():
             highlights, events = det.analyzer.extract_combined_highlights(
                             sess['video_path'], det.player_tracks,
                             res['target_track_id'], fps=fps,
-                            position=sess.get('position','ST'))
+                            position=sess.get('position','ST'),
+                            target_team=res.get('target_team', -1))
             master_url = det.analyzer.generate_master_sizzle_reel(
                             sess['video_path'], events, det.player_tracks,
                             res['target_track_id'], sid,

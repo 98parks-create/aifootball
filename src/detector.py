@@ -26,6 +26,7 @@ class FootballDetector:
         self.player_tracks = {}
         self._target_hist = None
         self._target_hist_count = 0
+        self._team_centers = None   # K-means team color centroids
 
     # ── Appearance Re-ID ─────────────────────────────────────────────────────
 
@@ -70,6 +71,67 @@ class FootballDetector:
                 best_s, best_i = s, i
         return best_i
 
+    # ── Team Color Clustering ────────────────────────────────────────────────
+
+    def _cluster_teams_init(self, frame, dets):
+        """K-means (k=2) on jersey histograms to learn 2 team color centroids."""
+        hists = []
+        for i in range(len(dets)):
+            if dets.class_id[i] != 0:
+                continue
+            h = self._extract_jersey_hist(frame, dets.xyxy[i])
+            if h is not None:
+                hists.append(h.flatten().astype(np.float32))
+        if len(hists) < 4:
+            self._team_centers = None
+            return
+        data = np.array(hists)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.1)
+        _, _, centers = cv2.kmeans(
+            data, 2, None, criteria, 10, cv2.KMEANS_PP_CENTERS
+        )
+        self._team_centers = centers
+        print(f"[TAD] Team clustering done: {len(hists)} players sampled")
+
+    def _get_team(self, frame, bbox):
+        """Classify player bbox as team 0 or 1 using stored centroids. -1 if unavailable."""
+        if self._team_centers is None:
+            return -1
+        h = self._extract_jersey_hist(frame, bbox)
+        if h is None:
+            return -1
+        hf = h.flatten().astype(np.float32)
+        dists = [float(np.linalg.norm(hf - self._team_centers[k])) for k in range(2)]
+        return int(np.argmin(dists))
+
+    # ── Gap Interpolation ────────────────────────────────────────────────────
+
+    def _interpolate_gaps(self, frames, fps, max_gap_sec=1.0):
+        """Linear interpolation for tracking gaps up to max_gap_sec seconds."""
+        if len(frames) < 2:
+            return frames
+        max_gap = int(fps * max_gap_sec)
+        result = list(frames)
+        for i in range(len(frames) - 1):
+            f1, f2 = frames[i]['frame'], frames[i+1]['frame']
+            gap = f2 - f1
+            if gap <= 1 or gap > max_gap:
+                continue
+            p1, p2   = frames[i]['pos'],    frames[i+1]['pos']
+            px1, px2 = frames[i]['pos_px'], frames[i+1]['pos_px']
+            for f in range(f1 + 1, f2):
+                a = (f - f1) / gap
+                result.append({
+                    "frame": f,
+                    "pos":    [p1[0]  + a*(p2[0]-p1[0]),   p1[1]  + a*(p2[1]-p1[1])],
+                    "pos_px": [px1[0] + a*(px2[0]-px1[0]), px1[1] + a*(px2[1]-px1[1])],
+                    "class": 0, "conf": 0.0,
+                    "bbox": frames[i]['bbox'],
+                    "interpolated": True,
+                })
+        result.sort(key=lambda x: x['frame'])
+        return result
+
     # ── Public API ───────────────────────────────────────────────────────────
 
     def detect_players_for_selection(self, video_path):
@@ -109,18 +171,27 @@ class FootballDetector:
         W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+        # ── Team color clustering (first frame) ───────────────────────────
+        ok, first_frame = cap.read()
+        if ok:
+            r0 = self.model(first_frame, conf=0.25, verbose=False)[0]
+            d0 = sv.Detections.from_ultralytics(r0)
+            self._cluster_teams_init(first_frame, d0)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)   # rewind to start
+
         out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (W, H))
         if not out.isOpened():
             out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (W, H))
 
-        target_id = None
-        last_px = None
+        target_id   = None
+        last_px     = None
         frames_lost = 0
-        PROXY_WIN = int(fps * 2)
-        APPEAR_WIN = int(fps * 4)
+        target_team = -1          # team id of the target player
+        tid_team    = {}          # cache: tracker_id -> team_id
+        PROXY_WIN   = int(fps * 2)
+        APPEAR_WIN  = int(fps * 4)
 
-        # Unified target track — accumulates ALL frames where target is found,
-        # regardless of tracker ID changes (re-locks, camera cuts, etc.)
+        # Unified target track — ALL frames regardless of ID changes
         target_frames = []
 
         idx = 0
@@ -226,27 +297,35 @@ class FootballDetector:
                             continue
                         tid = int(dets.tracker_id[i])
                         xyxy = dets.xyxy[i]
+                        if tid not in tid_team:
+                            tid_team[tid] = self._get_team(frame, xyxy)
                         if tid not in self.player_tracks:
                             self.player_tracks[tid] = []
                         self.player_tracks[tid].append({
-                            "frame": idx,
-                            "pos": tpts[i].tolist(),
-                            "pos_px": [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
-                            "class": int(dets.class_id[i]),
-                            "conf": float(dets.confidence[i]) if dets.confidence is not None else 0.5,
-                            "bbox": xyxy.tolist(),
+                            "frame":   idx,
+                            "pos":     tpts[i].tolist(),
+                            "pos_px":  [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
+                            "class":   int(dets.class_id[i]),
+                            "conf":    float(dets.confidence[i]) if dets.confidence is not None else 0.5,
+                            "bbox":    xyxy.tolist(),
+                            "team_id": tid_team[tid],
                         })
 
                     # ── Append to unified target track ────────────────────
                     if found and found_i is not None:
                         xyxy = dets.xyxy[found_i]
+                        # Capture target's team on first lock
+                        if target_team == -1:
+                            target_team = self._get_team(frame, xyxy)
+                            print(f"[TAD] Target team: {target_team}")
                         target_frames.append({
-                            "frame": idx,
-                            "pos": tpts[found_i].tolist(),
-                            "pos_px": [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
-                            "class": 0,
-                            "conf": float(dets.confidence[found_i]) if dets.confidence is not None else 0.5,
-                            "bbox": xyxy.tolist(),
+                            "frame":   idx,
+                            "pos":     tpts[found_i].tolist(),
+                            "pos_px":  [(xyxy[0]+xyxy[2])/2, (xyxy[1]+xyxy[3])/2],
+                            "class":   0,
+                            "conf":    float(dets.confidence[found_i]) if dets.confidence is not None else 0.5,
+                            "bbox":    xyxy.tolist(),
+                            "team_id": target_team,
                         })
 
                 # ── Draw target overlay ───────────────────────────────────
@@ -277,15 +356,19 @@ class FootballDetector:
         cap.release()
         out.release()
 
-        # Store unified target track under a fixed key so all downstream
-        # functions (stats, highlights, heatmap) always use the complete trajectory
+        # Fill gaps with linear interpolation (≤1s gaps)
+        target_frames = self._interpolate_gaps(target_frames, fps, max_gap_sec=1.0)
+
+        # Store unified target track under fixed key
         self.player_tracks[UNIFIED_TARGET_ID] = target_frames
-        print(f"[TAD] Done. target_id={target_id}, unified_frames={len(target_frames)}, players_tracked={len(self.player_tracks)}")
+        print(f"[TAD] Done. target_id={target_id}, unified_frames={len(target_frames)}, "
+              f"target_team={target_team}, players_tracked={len(self.player_tracks)}")
 
         stats = self.analyzer.calculate_individual_stats(
             self.player_tracks, UNIFIED_TARGET_ID, fps=fps
         )
         return {
-            "stats": stats,
+            "stats":           stats,
             "target_track_id": UNIFIED_TARGET_ID,
+            "target_team":     target_team,
         }

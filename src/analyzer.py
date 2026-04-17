@@ -42,20 +42,31 @@ class FootballAnalyzer:
         return np.sqrt(dx**2+dy**2) * fps * 3.6
 
     def _build_speed_map(self, target_tracks, fps):
-        """Per-frame speed (km/h), noise-filtered and smoothed."""
-        frames, raw = [], []
-        for i in range(1, len(target_tracks)):
-            spd = self._speed_kmh(target_tracks[i-1]['pos'], target_tracks[i]['pos'], fps)
-            if spd < 38.0:
-                frames.append(target_tracks[i]['frame'])
-                raw.append(spd)
-        smoothed = self._smooth_speeds(raw, window=5)
-        return {f: s for f, s in zip(frames, smoothed)}
+        """Window-based speed: displacement over ±5-frame window.
+        Eliminates bbox jitter that inflates frame-to-frame calculations."""
+        if len(target_tracks) < 3:
+            return {}
+        sorted_t = sorted(target_tracks, key=lambda t: t['frame'])
+        frame_list = [t['frame'] for t in sorted_t]
+        by_frame   = {t['frame']: t['pos'] for t in sorted_t}
+        n = len(frame_list)
+        HALF = 5
+        speed_map = {}
+        for idx in range(n):
+            lo, hi   = max(0, idx - HALF), min(n - 1, idx + HALF)
+            f_lo, f_hi = frame_list[lo], frame_list[hi]
+            dt = (f_hi - f_lo) / fps
+            if dt <= 0:
+                continue
+            dx = (by_frame[f_hi][0] - by_frame[f_lo][0]) * SCALE_X
+            dy = (by_frame[f_hi][1] - by_frame[f_lo][1]) * SCALE_Y
+            spd = min(np.sqrt(dx**2 + dy**2) / dt * 3.6, 38.0)
+            speed_map[frame_list[idx]] = spd
+        return speed_map
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def _smooth_speeds(self, speeds, window=5):
-        """Rolling mean to suppress detection jitter."""
         if len(speeds) < window:
             return speeds
         result = []
@@ -72,25 +83,30 @@ class FootballAnalyzer:
         if not tracks or target_id not in tracks or not tracks[target_id]:
             return empty
 
-        data = tracks[target_id]
-        positions = [t['pos'] for t in data]
-        dist_m, raw_speeds = 0.0, []
-        for i in range(1, len(positions)):
-            spd = self._speed_kmh(positions[i-1], positions[i], fps)
-            if spd < 40:
-                dx = (positions[i][0]-positions[i-1][0]) * SCALE_X
-                dy = (positions[i][1]-positions[i-1][1]) * SCALE_Y
-                dist_m += np.sqrt(dx**2+dy**2)
-                raw_speeds.append(spd)
+        data = sorted(tracks[target_id], key=lambda t: t['frame'])
 
-        speeds = self._smooth_speeds(raw_speeds)
-        top = min(max(speeds) if speeds else 0, 38.0)  # physical cap (world record ~36 km/h)
+        # Window-based speed map (accurate, noise-free)
+        speed_map = self._build_speed_map(data, fps)
+        speeds = [v for v in speed_map.values()]
+
+        # Distance with per-frame cap to reject teleportation artifacts
+        max_d_frame = (38.0 / 3.6 / fps) * 1.5   # 38 km/h × 1.5 headroom
+        dist_m = 0.0
+        positions = [t['pos'] for t in data]
+        for i in range(1, len(positions)):
+            dx = (positions[i][0]-positions[i-1][0]) * SCALE_X
+            dy = (positions[i][1]-positions[i-1][1]) * SCALE_Y
+            d  = np.sqrt(dx**2+dy**2)
+            if d <= max_d_frame:
+                dist_m += d
+
+        top = min(max(speeds) if speeds else 0, 38.0)
         avg = float(np.mean(speeds)) if speeds else 0
         km  = dist_m / 1000
 
-        # State machine: sprint starts at >= 20 km/h, ends at < 15 km/h
+        # Sprint state machine: on ≥20 km/h, off <15 km/h (hysteresis prevents flicker)
         sprint_count = 0
-        in_sprint = False
+        in_sprint    = False
         for s in speeds:
             if not in_sprint and s >= 20.0:
                 in_sprint = True
@@ -195,21 +211,22 @@ class FootballAnalyzer:
 
     # ── Position-aware Event Detection ───────────────────────────────────────
 
-    def _detect_events_by_position(self, tracks, target_id, ball_dict, fps=25, position="ST"):
+    def _detect_events_by_position(self, tracks, target_id, ball_dict,
+                                    fps=25, position="ST", target_team=-1):
         pos = position.upper()
         is_fwd = any(p in pos for p in ["ST","CF","LW","RW","SS","FW","CAM","AM"])
         is_mid = (any(p in pos for p in ["MF","CM","DM","CDM"]) and not is_fwd)
         is_def = (any(p in pos for p in ["CB","LB","RB","WB","SW","DF","GK"])
                   or not (is_fwd or is_mid))
 
-        target_tracks = tracks[target_id]
+        target_tracks = sorted(tracks[target_id], key=lambda t: t['frame'])
         if len(target_tracks) < 2:
             return []
 
         target_by_frame = {t['frame']: t for t in target_tracks}
         speed_map = self._build_speed_map(target_tracks, fps)
 
-        # Ball velocity map (km/h)
+        # Ball velocity map (km/h) using window smoothing
         ball_frames = sorted(ball_dict.keys())
         ball_speed = {}
         for i in range(1, len(ball_frames)):
@@ -217,17 +234,30 @@ class FootballAnalyzer:
             p1, p2 = ball_dict[ball_frames[i-1]], ball_dict[f]
             dx = (p2[0]-p1[0]) * SCALE_X
             dy = (p2[1]-p1[1]) * SCALE_Y
-            ball_speed[f] = np.sqrt(dx**2+dy**2) * fps * 3.6
+            ball_speed[f] = min(np.sqrt(dx**2+dy**2) * fps * 3.6, 150.0)
 
-        # Other players by frame (opponents + teammates, can't distinguish without team labels)
-        others_by_frame = {}
+        # Separate opponents and teammates using team_id
+        opponents_by_frame = {}
+        teammates_by_frame = {}
         for tid, data in tracks.items():
-            if tid == target_id: continue
+            if tid == target_id:
+                continue
             for t in data:
-                if t.get('class') != 0: continue
-                f = t['frame']
-                if f not in others_by_frame: others_by_frame[f] = []
-                others_by_frame[f].append(t['pos'])
+                if t.get('class') != 0:
+                    continue
+                f      = t['frame']
+                t_team = t.get('team_id', -1)
+                is_opp = (target_team == -1 or t_team == -1 or t_team != target_team)
+                dest   = opponents_by_frame if is_opp else teammates_by_frame
+                if f not in dest:
+                    dest[f] = []
+                dest[f].append(t['pos'])
+
+        # Legacy alias for code below (contested = any nearby player)
+        others_by_frame = {
+            f: opponents_by_frame.get(f, []) + teammates_by_frame.get(f, [])
+            for f in set(list(opponents_by_frame.keys()) + list(teammates_by_frame.keys()))
+        }
 
         events = []
         min_gap = int(fps * 4)
@@ -279,15 +309,15 @@ class FootballAnalyzer:
             bspd_after = max((ball_speed.get(f+k,0) for k in range(1,int(fps*0.5)) if f+k in ball_speed), default=0)
             bspd_before = max((ball_speed.get(f-k,0) for k in range(1,int(fps*0.4)) if f-k in ball_speed), default=0)
 
-            # 근처에 다른 선수가 있었나 (태클/수비 상황)
+            # 근처에 상대 선수가 있었나 (팀 구분 적용)
             contested = any(
                 np.hypot(op[0]-bp[0], op[1]-bp[1]) < 4.0
-                for op in others_by_frame.get(f, [])
+                for op in opponents_by_frame.get(f, [])
             )
             opp_had_ball = any(
                 np.hypot(op[0]-ball_dict.get(f-k,bp)[0], op[1]-ball_dict.get(f-k,bp)[1]) < 2.5
                 for k in range(1, int(fps*0.8))
-                for op in others_by_frame.get(f-k, [])
+                for op in opponents_by_frame.get(f-k, [])
                 if f-k in ball_dict
             )
 
@@ -406,7 +436,8 @@ class FootballAnalyzer:
 
     # ── Clip extraction ───────────────────────────────────────────────────────
 
-    def extract_combined_highlights(self, video_path, tracks, target_id, fps=25, position="ST"):
+    def extract_combined_highlights(self, video_path, tracks, target_id,
+                                     fps=25, position="ST", target_team=-1):
         if target_id not in tracks:
             return [], []
         try:
@@ -421,7 +452,9 @@ class FootballAnalyzer:
                        if data and data[0].get('class') == 32 for t in data]
         ball_dict = {b['frame']: b['pos'] for b in ball_tracks}
 
-        events = self._detect_events_by_position(tracks, target_id, ball_dict, fps, position)
+        events = self._detect_events_by_position(
+            tracks, target_id, ball_dict, fps, position, target_team
+        )
 
         pre  = int(fps * 3)
         post = int(fps * 3)
