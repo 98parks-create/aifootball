@@ -19,9 +19,27 @@ UNIFIED_TARGET_ID = -1
 
 
 class FootballDetector:
-    def __init__(self, model_path='models/yolov8s.pt'):
+    def __init__(self, model_path='models/yolov8s.pt', scan_model_path=None):
         self.model = YOLO(model_path)
         self.model.to(_DEVICE)
+        # 480p 스캔 전용 경량 모델 (없으면 기본 모델 공유)
+        if scan_model_path and os.path.exists(scan_model_path):
+            self.scan_model = YOLO(scan_model_path)
+            self.scan_model.to(_DEVICE)
+            print(f"[TAD] 스캔 모델: {scan_model_path}")
+        else:
+            self.scan_model = self.model
+        # GPU 최적화: FP16 + cudnn 자동 튜닝
+        if _DEVICE == 'cuda':
+            try:
+                import torch
+                torch.backends.cudnn.benchmark = True
+                self.scan_model.model.half()
+                if self.scan_model is not self.model:
+                    self.model.model.half()
+                print("[TAD] GPU FP16 활성화")
+            except Exception as e:
+                print(f"[TAD] FP16 비활성화 (fallback): {e}")
         self.analyzer = FootballAnalyzer()
         self.player_tracks = {}
         self._target_hist = None
@@ -226,7 +244,7 @@ class FootballDetector:
         ok, first_frame = cap.read()
         if ok:
             small0 = cv2.resize(first_frame, (scan_w, scan_h))
-            r0 = self.model(small0, conf=0.25, verbose=False)[0]
+            r0 = self.scan_model(small0, conf=0.25, verbose=False)[0]
             d0 = sv.Detections.from_ultralytics(r0)
             self._cluster_teams_init(small0, d0)
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -239,6 +257,8 @@ class FootballDetector:
         PROXY_WIN     = int(fps * 2)
         APPEAR_WIN    = int(fps * 4)
         target_frames: list = []
+        # 타겟이 안정 추적 중일 때만 격 프레임 처리 (추적 불안정 시 매 프레임)
+        STABLE_SKIP   = 2
 
         idx = 0
         while cap.isOpened():
@@ -246,14 +266,19 @@ class FootballDetector:
             if not ret:
                 break
 
-            if progress_callback and idx % 15 == 0:
+            # 타겟 안정 추적 중(frames_lost==0)에만 격 프레임 스킵
+            if target_id is not None and frames_lost == 0 and idx % STABLE_SKIP != 0:
+                idx += 1
+                continue
+
+            if progress_callback and idx % 8 == 0:
                 progress_callback((idx / total_frames) * 100)
 
             # 480p 다운스케일
             small = cv2.resize(frame, (scan_w, scan_h))
 
             try:
-                results = self.model.track(
+                results = self.scan_model.track(
                     small, persist=True, conf=0.2,
                     classes=[0, 32], verbose=False,
                     tracker=_tracker,

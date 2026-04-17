@@ -9,3 +9,5 @@ supervision
 scipy
 requests
 Pillow
+python-dotenv
+werkzeug

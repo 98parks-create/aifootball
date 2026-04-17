@@ -233,6 +233,10 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
   <div id="p-pct" style="font-size:1.8rem;font-weight:900;margin-top:8px">0%</div>
   <div id="p-stage" style="color:var(--gold);font-weight:700;margin-top:8px;font-size:.95rem">준비 중...</div>
   <div id="p-eta" style="opacity:.45;margin-top:6px;font-size:.88rem">예상 시간 계산 중...</div>
+  <div style="margin-top:28px;padding:18px 28px;background:rgba(255,255,255,.05);border-radius:14px;border:1px solid rgba(255,215,0,.2);text-align:center">
+    <p style="color:var(--gold);font-weight:700;margin-bottom:6px">이 페이지를 닫아도 괜찮아요</p>
+    <p style="opacity:.55;font-size:.85rem">분석이 완료되면 가입하신 이메일로 결과 링크를 보내드립니다.</p>
+  </div>
 </div>
 
 <script>
@@ -243,12 +247,46 @@ const canvas=document.getElementById('c-canvas'), ctx=canvas.getContext('2d'), f
 window.onload = async () => {
   setTimeout(()=>document.getElementById('loader').classList.remove('on'), 700);
   const me = await fetch('/api/me').then(r=>r.json());
+
+  // 이메일 링크로 접근 시 (?sid=...) 바로 결과 로드
+  const urlSid = new URLSearchParams(location.search).get('sid');
+  if(urlSid){
+    SID = urlSid;
+    if(me.logged_in){
+      hideAuth();
+      document.getElementById('hdr-name').innerText = me.username;
+    } else {
+      hideAuth(); // 링크 접근은 로그인 없이도 결과 확인 허용
+    }
+    loadResultFromDB(urlSid);
+    return;
+  }
+
   if(me.logged_in){
     hideAuth();
     document.getElementById('hdr-name').innerText = me.username;
     show('step-profile');
   }
 };
+
+async function loadResultFromDB(sid){
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('p-stage').innerText = '결과 불러오는 중...';
+  document.getElementById('p-pct').innerText = '';
+  document.getElementById('p-eta').innerText = '';
+  document.getElementById('pbar').style.width = '100%';
+  const d = await fetch('/results/'+sid).then(r=>r.json());
+  document.getElementById('overlay').classList.remove('on');
+  if(d.error){ alert('오류: '+d.error); return; }
+  if(d.status==='processing'){
+    // 아직 처리 중이면 폴링으로 전환
+    document.getElementById('overlay').classList.add('on');
+    document.getElementById('p-stage').innerText = '분석이 아직 진행 중입니다...';
+    pollProgress();
+    return;
+  }
+  renderDash(d);
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 function switchTab(t){
@@ -360,12 +398,16 @@ function pollProgress(){
       document.getElementById('pbar').style.width=pct+'%';
       document.getElementById('p-pct').innerText=pct+'%';
       if(d.stage_msg) document.getElementById('p-stage').innerText=d.stage_msg;
-      const el=(Date.now()-t0)/1000;
-      if(pct>5){ const rem=Math.max(0,Math.round((el/pct)*(100-pct))); document.getElementById('p-eta').innerText=`약 ${rem}초 남음`; }
+      if(pct>1){
+        const el=(Date.now()-t0)/1000;
+        const remSec=Math.max(0,Math.round((el/pct)*(100-pct)));
+        const etaStr=remSec>=60?`약 ${Math.floor(remSec/60)}분 ${remSec%60}초 남음`:`약 ${remSec}초 남음`;
+        document.getElementById('p-eta').innerText=etaStr;
+      }
       if(d.status==='completed'){ clearInterval(pInterval); fetchResult(); }
       else if(d.status==='error'){ clearInterval(pInterval); stopOverlay(); alert('분석 오류: '+(d.message||'')); }
     });
-  },1500);
+  },800);
 }
 
 function fetchResult(){
