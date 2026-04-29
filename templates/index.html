@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>TAD AI | Football Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<style>
+:root{--red:#ff1a1a;--bg:#080808;--gold:#ffd700;--glass:rgba(255,255,255,0.04);--border:rgba(255,255,255,0.1);}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Outfit',sans-serif;}
+body{background:var(--bg);color:#fff;min-height:100vh;background-image:radial-gradient(circle at 50% 30%,#1a0000,#080808 70%);overflow-x:hidden;}
+.wrap{max-width:1500px;margin:0 auto;padding:40px 20px;}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:50px;}
+.logo{font-size:2.2rem;font-weight:900;letter-spacing:-2px;background:linear-gradient(to right,#ff1a1a,#ff7b00);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-transform:uppercase;}
+.hidden{display:none!important;}
+.step{background:rgba(20,20,20,.65);backdrop-filter:blur(40px);border:1px solid var(--border);border-radius:40px;padding:70px 40px;text-align:center;box-shadow:0 40px 100px rgba(0,0,0,.8);animation:up .7s cubic-bezier(.2,.8,.2,1);}
+@keyframes up{from{opacity:0;transform:translateY(36px)}to{opacity:1;transform:translateY(0)}}
+/* inputs */
+.inp{background:#151515;border:1px solid var(--border);padding:16px 18px;border-radius:14px;color:#fff;width:100%;font-size:1rem;outline:none;transition:.3s;}
+.inp:focus{border-color:var(--red);background:#1e1e1e;}
+.btn{background:linear-gradient(45deg,#ff1a1a,#dc143c);border:none;padding:18px 48px;border-radius:100px;color:#fff;font-weight:800;cursor:pointer;transition:.3s;font-size:1rem;text-transform:uppercase;}
+.btn:hover{transform:scale(1.04);box-shadow:0 18px 45px rgba(255,26,26,.4);}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;}
+.btn-ghost{background:transparent;border:1px solid var(--border);padding:14px 36px;border-radius:100px;color:#aaa;font-weight:700;cursor:pointer;transition:.3s;font-size:.9rem;}
+.btn-ghost:hover{border-color:var(--red);color:#fff;}
+/* FIFA card */
+.fifa-card{width:340px;height:500px;background:linear-gradient(135deg,#4b0000,#8b0000 50%,#b22222);border-radius:20px;position:relative;color:#fff;padding:28px;box-shadow:0 40px 80px rgba(0,0,0,.6),inset 0 0 100px rgba(0,0,0,.5);margin:0 auto;border:2px solid rgba(255,215,0,.2);overflow:hidden;}
+.fifa-card::before{content:"";position:absolute;inset:0;background:url('https://www.transparenttextures.com/patterns/hexellence.png');opacity:.15;mix-blend-mode:overlay;}
+.card-stats{position:absolute;left:28px;top:95px;font-size:1.55rem;font-weight:900;line-height:1.1;z-index:2;text-shadow:0 5px 15px rgba(0,0,0,.5);}
+.card-stats div{margin-bottom:7px;color:#ddd;}
+.card-stats div span{color:var(--gold);}
+.p-img-wrap{position:absolute;top:38px;right:-28px;width:270px;height:370px;z-index:1;mask-image:linear-gradient(to bottom,black 85%,transparent);}
+.p-img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 20px 40px rgba(0,0,0,.6));}
+.p-info{position:absolute;bottom:40px;width:100%;left:0;text-align:center;z-index:3;}
+.p-name{font-size:2rem;font-weight:900;text-transform:uppercase;letter-spacing:-1px;}
+.p-meta{font-size:.9rem;font-weight:700;color:var(--gold);margin-top:4px;}
+/* dashboard */
+.dash-grid{display:grid;grid-template-columns:380px 1fr;gap:40px;}
+.card-box{background:var(--glass);border-radius:28px;padding:26px;border:1px solid var(--border);margin-bottom:24px;}
+.heatmap-wrap{width:100%;height:240px;border-radius:14px;overflow:hidden;border:1px solid var(--border);}
+.heatmap-img{width:100%;height:100%;object-fit:cover;}
+.stat-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;padding:9px 16px;font-size:.9rem;font-weight:700;}
+.stat-badge .v{color:var(--gold);font-size:1.1rem;}
+.reel{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px;}
+.clip-card{background:#111;border-radius:20px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:.3s;}
+.clip-card:hover{transform:translateY(-6px);border-color:var(--red);}
+.clip-tag{font-size:.75rem;font-weight:900;padding:3px 10px;border-radius:20px;display:inline-block;}
+.tag-attack {background:rgba(255,100,100,.18);color:#ff8080;}
+.tag-defense{background:rgba(100,180,255,.18);color:#64b4ff;}
+.tag-mid    {background:rgba(255,215,0,.15);color:var(--gold);}
+.tag-bad    {background:rgba(248,113,113,.15);color:#f87171;}
+.tag-goal   {background:rgba(255,215,0,.3);color:#ffd700;font-size:.85rem;}
+.sect-tab{background:rgba(255,255,255,.06);border:1px solid var(--border);color:#aaa;font-weight:700;padding:9px 20px;border-radius:100px;cursor:pointer;transition:.2s;font-size:.88rem;}
+.sect-tab.active{background:rgba(255,26,26,.2);border-color:var(--red);color:#fff;}
+/* progress overlay */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.97);z-index:10000;display:flex;flex-direction:column;justify-content:center;align-items:center;backdrop-filter:blur(20px);opacity:0;pointer-events:none;transition:opacity .5s;}
+#overlay.on{opacity:1;pointer-events:auto;}
+.pbar-wrap{width:380px;height:8px;background:rgba(255,255,255,.05);border-radius:10px;overflow:hidden;margin-bottom:18px;border:1px solid var(--border);}
+#pbar{width:0%;height:100%;background:linear-gradient(to right,#ff1a1a,#ff7b00);transition:width .5s;}
+/* loader */
+#loader{position:fixed;inset:0;background:#080808;z-index:20000;display:flex;justify-content:center;align-items:center;opacity:0;pointer-events:none;transition:opacity .8s;}
+#loader.on{opacity:1;pointer-events:auto;}
+/* auth modal */
+#auth-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(16px);}
+.auth-box{background:#111;border:1px solid var(--border);border-radius:32px;padding:50px 40px;width:420px;max-width:95vw;text-align:center;}
+.tab-btn{background:none;border:none;color:#666;font-size:1rem;font-weight:700;cursor:pointer;padding:10px 24px;border-radius:100px;transition:.2s;}
+.tab-btn.active{background:rgba(255,26,26,.15);color:var(--red);}
+@media(max-width:1100px){.dash-grid{grid-template-columns:1fr;}}
+@media(max-width:600px){.step{padding:36px 18px;}.fifa-card{width:290px;height:430px;}}
+</style>
+</head>
+<body>
+
+<!-- Boot -->
+<div id="loader" class="on"><div style="text-align:center"><h1 style="font-size:3.8rem;font-weight:900;background:linear-gradient(to right,#ff1a1a,#ffd700);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">TAD AI</h1><p style="opacity:.5;letter-spacing:4px;margin-top:10px">Loading...</p></div></div>
+
+<!-- Auth Modal -->
+<div id="auth-modal">
+  <div class="auth-box">
+    <h2 style="font-size:2rem;font-weight:900;margin-bottom:6px">TAD AI</h2>
+    <p style="opacity:.5;margin-bottom:28px;font-size:.9rem">AI 축구 분석 플랫폼</p>
+    <div style="margin-bottom:28px">
+      <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">로그인</button>
+      <button class="tab-btn" id="tab-register" onclick="switchTab('register')">회원가입</button>
+    </div>
+    <!-- Login -->
+    <div id="form-login">
+      <input id="l-email" class="inp" type="email" placeholder="이메일" style="margin-bottom:12px">
+      <input id="l-pass"  class="inp" type="password" placeholder="비밀번호" style="margin-bottom:20px">
+      <div id="l-err" style="color:#f87171;font-size:.85rem;margin-bottom:12px;min-height:18px"></div>
+      <button class="btn" style="width:100%" onclick="doLogin()">로그인</button>
+    </div>
+    <!-- Register -->
+    <div id="form-register" class="hidden">
+      <input id="r-name"  class="inp" type="text"     placeholder="닉네임" style="margin-bottom:12px">
+      <input id="r-email" class="inp" type="email"    placeholder="이메일" style="margin-bottom:12px">
+      <input id="r-pass"  class="inp" type="password" placeholder="비밀번호 (6자 이상)" style="margin-bottom:20px">
+      <div id="r-err" style="color:#f87171;font-size:.85rem;margin-bottom:12px;min-height:18px"></div>
+      <button class="btn" style="width:100%" onclick="doRegister()">가입하기</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <header>
+    <div class="logo">TAD AI</div>
+    <div id="hdr-user" style="display:flex;align-items:center;gap:16px">
+      <span id="hdr-name" style="font-weight:700;color:var(--gold)"></span>
+      <button class="btn-ghost" onclick="doLogout()">로그아웃</button>
+    </div>
+  </header>
+
+  <!-- Step 0: Profile -->
+  <main id="step-profile" class="step hidden">
+    <h1 style="font-size:3.2rem;font-weight:900;margin-bottom:8px">Player Profile</h1>
+    <p style="opacity:.6;margin-bottom:44px">선수 정보를 입력하면 FIFA 카드에 반영됩니다.</p>
+    <div style="max-width:760px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">선수 이름</label><input id="pf-name" class="inp" placeholder="KIM KOREA"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">팀명</label><input id="pf-team" class="inp" placeholder="RED DEVILS FC"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">생년월일</label><input id="pf-birth" class="inp" type="date"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">주 발</label>
+        <select id="pf-foot" class="inp"><option value="Right">RIGHT FOOT</option><option value="Left">LEFT FOOT</option><option value="Both">BOTH FEET</option></select></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">포지션</label><input id="pf-pos" class="inp" placeholder="ST / CM / CB / GK"></div>
+      <div style="text-align:left"><label style="display:block;margin-bottom:8px;font-weight:800;color:var(--red);font-size:.9rem">프로필 사진</label><input id="pf-img" class="inp" type="file" accept="image/*" style="padding:12px"></div>
+    </div>
+    <button class="btn" style="margin-top:44px" onclick="goUpload()">다음 단계 →</button>
+  </main>
+
+  <!-- Step 1: Upload -->
+  <main id="step-upload" class="step hidden">
+    <h1 style="font-size:3.2rem;font-weight:900;margin-bottom:18px">VIDEO UPLOAD</h1>
+    <p style="opacity:.6;margin-bottom:44px">분석할 경기 영상을 선택하세요.</p>
+    <input type="file" id="vid-input" class="hidden" accept="video/*" onchange="handleUpload()">
+    <button class="btn" onclick="document.getElementById('vid-input').click()">영상 파일 선택</button>
+  </main>
+
+  <!-- Step 2: Calibrate -->
+  <main id="step-calib" class="step hidden">
+    <h1 style="font-size:2.8rem;font-weight:900;margin-bottom:16px">CALIBRATION</h1>
+    <p style="opacity:.7;margin-bottom:10px"><strong style="color:var(--red)">① 경기장 모서리 4곳</strong>을 순서대로 클릭 (좌상→우상→우하→좌하)</p>
+    <p style="opacity:.7;margin-bottom:20px"><strong style="color:var(--gold)">② 분석할 선수 1명</strong>을 마지막으로 클릭</p>
+    <div style="position:relative;display:inline-block;border-radius:16px;overflow:hidden;border:2px solid var(--border)">
+      <canvas id="c-canvas"></canvas>
+    </div>
+    <div id="c-status" style="margin-top:16px;opacity:.7">모서리 <span id="c-cnt">0</span>/4</div>
+    <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <button class="btn-ghost" id="auto-btn" onclick="autoCalibrate()">🔍 경기장 자동 감지</button>
+      <button class="btn-ghost" onclick="resetCalib()" style="font-size:.85rem">↩ 초기화</button>
+    </div>
+    <div id="auto-msg" style="margin-top:10px;font-size:.85rem;min-height:20px"></div>
+    <div style="margin-top:20px"><button class="btn" id="c-btn" disabled onclick="startAnalysis()">AI 정밀 분석 시작</button></div>
+  </main>
+
+  <!-- Step 3: Dashboard -->
+  <main id="step-dash" class="hidden">
+    <div class="dash-grid">
+      <!-- Sidebar -->
+      <div>
+        <div id="card-wrap">
+          <div class="fifa-card">
+            <div class="card-stats">
+              <div>PAC <span id="s-pac">—</span></div>
+              <div>DRI <span id="s-dri">—</span></div>
+              <div>SHO <span id="s-sho">—</span></div>
+              <div>PAS <span id="s-pas">—</span></div>
+              <div>PHY <span id="s-phy">—</span></div>
+            </div>
+            <div class="p-img-wrap"><img src="https://images.unsplash.com/photo-1543351611-58f69d7c1781?auto=format" id="card-img" class="p-img"></div>
+            <div class="p-info">
+              <div class="p-name" id="d-name">PLAYER</div>
+              <div class="p-meta"><span id="d-pos">ST</span> | <span id="d-foot">RIGHT</span> | <span id="d-birth">—</span></div>
+              <div id="d-team" style="font-size:.85rem;font-weight:800;color:var(--gold);margin-top:6px">TEAM</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real stats -->
+        <div class="card-box" style="margin-top:22px">
+          <h3 style="color:var(--red);margin-bottom:14px;font-size:.9rem;text-transform:uppercase">Real Performance Data</h3>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            <div class="stat-badge">🏃 이동거리 <span class="v" id="d-dist">—</span> km</div>
+            <div class="stat-badge">⚡ 최고속도 <span class="v" id="d-spd">—</span> km/h</div>
+            <div class="stat-badge">💨 스프린트 <span class="v" id="d-spr">—</span> 회</div>
+            <div class="stat-badge">🎯 패스성공률 <span class="v" id="d-psr">—</span>%</div>
+            <div class="stat-badge" id="d-btc-wrap" style="display:none">🦶 볼터치 <span class="v" id="d-btc">—</span> 회</div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+          <button class="btn" onclick="dlCardAPI()" style="width:100%;border-radius:14px">📥 퍼포먼스 카드 저장</button>
+          <button class="btn" onclick="dlPDF()" style="width:100%;border-radius:14px;background:linear-gradient(45deg,#1a1a2e,#16213e);border:1px solid rgba(255,215,0,.4);color:#ffd700">📄 성장 리포트 PDF</button>
+          <button class="btn" onclick="openCoachShare()" style="width:100%;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid var(--border);color:#aaa;font-size:.85rem">📧 코치에게 공유</button>
+        </div>
+
+        <!-- 코치 공유 폼 (숨김) -->
+        <div id="coach-form" style="display:none;background:#111;border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px">
+          <p style="font-size:.85rem;color:var(--gold);font-weight:700;margin-bottom:10px">코치 이메일로 PDF 리포트 발송</p>
+          <input id="coach-email" class="inp" type="email" placeholder="coach@example.com" style="margin-bottom:8px">
+          <textarea id="coach-msg" class="inp" rows="2" placeholder="한마디 (선택)" style="resize:none;margin-bottom:8px"></textarea>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="sendCoach()" style="flex:1;border-radius:10px;font-size:.88rem">발송</button>
+            <button onclick="document.getElementById('coach-form').style.display='none'" style="background:none;border:1px solid var(--border);color:#aaa;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:.88rem">취소</button>
+          </div>
+        </div>
+
+        <!-- Heatmap -->
+        <div class="card-box">
+          <h3 style="color:var(--red);margin-bottom:16px;font-size:.9rem;text-transform:uppercase">Pitch Heatmap</h3>
+          <div class="heatmap-wrap"><img src="" id="hm-img" class="heatmap-img"></div>
+          <p style="margin-top:10px;font-size:.82rem;opacity:.55">밝을수록 많이 활동한 구역</p>
+        </div>
+
+        <!-- Growth chart -->
+        <div class="card-box">
+          <h3 style="color:var(--red);margin-bottom:16px;font-size:.9rem;text-transform:uppercase">Growth Progress</h3>
+          <canvas id="growth-chart" style="max-height:180px"></canvas>
+        </div>
+      </div>
+
+      <!-- Main -->
+      <div>
+        <!-- Master reel -->
+        <div class="card-box" style="padding:0;overflow:hidden;border:2px solid var(--red)">
+          <video id="main-vid" controls style="width:100%;display:block"></video>
+        </div>
+
+        <!-- AI Comment -->
+        <div class="card-box">
+          <h2 style="color:var(--red);font-weight:900;margin-bottom:10px">AI SCOUTING REPORT</h2>
+          <div id="ai-box" style="background:linear-gradient(45deg,rgba(255,26,26,.08),transparent);border-left:4px solid var(--red);padding:18px;border-radius:0 14px 14px 0;font-size:1rem;line-height:1.65"></div>
+        </div>
+
+        <!-- Section tabs -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:30px;margin-bottom:24px">
+          <button class="sect-tab active" data-sect="all"     onclick="showSect('all')">🎬 전체</button>
+          <button class="sect-tab"        data-sect="attack"  onclick="showSect('attack')">⚽ 공격</button>
+          <button class="sect-tab"        data-sect="defense" onclick="showSect('defense')">🛡 수비</button>
+          <button class="sect-tab"        data-sect="midfield"onclick="showSect('midfield')">⚙️ 운동량</button>
+          <button class="sect-tab"        data-sect="bad"     onclick="showSect('bad')">⚠️ 보완 필요</button>
+        </div>
+        <div class="reel" id="reel-all"></div>
+
+        <!-- ── 팀 피드 ──────────────────────────────────────────────────── -->
+        <div class="card-box" style="margin-top:32px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+            <h2 style="color:var(--red);font-weight:900;font-size:1.05rem">👥 팀 피드</h2>
+            <div style="display:flex;gap:8px">
+              <button onclick="openTeamCreate()" style="background:rgba(255,26,26,.15);border:1px solid var(--red);color:#fff;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700">+ 팀 만들기</button>
+              <button onclick="openTeamJoin()" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:#aaa;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.82rem">팀 참가</button>
+            </div>
+          </div>
+
+          <!-- 팀 만들기 폼 -->
+          <div id="team-create-form" style="display:none;background:#0d0d0d;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+            <input id="team-name-inp" class="inp" placeholder="팀 이름" style="margin-bottom:8px">
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="createTeam()" style="border-radius:8px;font-size:.85rem">만들기</button>
+              <button onclick="document.getElementById('team-create-form').style.display='none'" style="background:none;border:1px solid var(--border);color:#aaa;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.85rem">취소</button>
+            </div>
+          </div>
+
+          <!-- 팀 참가 폼 -->
+          <div id="team-join-form" style="display:none;background:#0d0d0d;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+            <input id="team-code-inp" class="inp" placeholder="초대코드 (8자리)" style="margin-bottom:8px;text-transform:uppercase">
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="joinTeam()" style="border-radius:8px;font-size:.85rem">참가</button>
+              <button onclick="document.getElementById('team-join-form').style.display='none'" style="background:none;border:1px solid var(--border);color:#aaa;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.85rem">취소</button>
+            </div>
+          </div>
+
+          <!-- 내 팀 목록 + 피드 -->
+          <div id="team-list" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+          <div id="team-feed-wrap" style="display:none">
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+              <span id="team-feed-name" style="font-weight:800;color:var(--gold)"></span>
+              <span id="team-invite-badge" style="font-size:.75rem;background:rgba(255,215,0,.12);color:var(--gold);padding:3px 10px;border-radius:20px;cursor:pointer" onclick="copyInvite()" title="클릭하면 복사"></span>
+              <button onclick="postHighlight()" style="margin-left:auto;background:rgba(255,26,26,.15);border:1px solid var(--red);color:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:.8rem;font-weight:700">+ 하이라이트 공유</button>
+            </div>
+            <div id="team-feed" style="display:flex;flex-direction:column;gap:12px;max-height:320px;overflow-y:auto"></div>
+          </div>
+
+          <p id="team-empty" style="opacity:.35;font-size:.88rem">팀에 참가하면 팀원 하이라이트를 공유할 수 있어요.</p>
+        </div>
+
+        <!-- ── 리그 순위표 ────────────────────────────────────────────────── -->
+        <div class="card-box" style="margin-top:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+            <h2 style="color:var(--red);font-weight:900;font-size:1.05rem">🏆 리그 순위표</h2>
+            <div style="display:flex;gap:8px">
+              <button onclick="openLeagueCreate()" style="background:rgba(255,26,26,.15);border:1px solid var(--red);color:#fff;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700">+ 리그 만들기</button>
+              <button onclick="openLeagueJoin()" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:#aaa;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.82rem">리그 참가</button>
+            </div>
+          </div>
+
+          <!-- 리그 만들기 폼 -->
+          <div id="league-create-form" style="display:none;background:#0d0d0d;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+            <input id="league-name-inp" class="inp" placeholder="리그 이름" style="margin-bottom:8px">
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="createLeague()" style="border-radius:8px;font-size:.85rem">만들기</button>
+              <button onclick="document.getElementById('league-create-form').style.display='none'" style="background:none;border:1px solid var(--border);color:#aaa;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.85rem">취소</button>
+            </div>
+          </div>
+
+          <!-- 리그 참가 폼 -->
+          <div id="league-join-form" style="display:none;background:#0d0d0d;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+            <input id="league-code-inp" class="inp" placeholder="초대코드 (8자리)" style="margin-bottom:8px;text-transform:uppercase">
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="joinLeague()" style="border-radius:8px;font-size:.85rem">참가</button>
+              <button onclick="document.getElementById('league-join-form').style.display='none'" style="background:none;border:1px solid var(--border);color:#aaa;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.85rem">취소</button>
+            </div>
+          </div>
+
+          <!-- 리그 목록 -->
+          <div id="league-list" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+          <!-- 순위표 -->
+          <div id="standings-wrap" style="display:none">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+              <span id="league-standings-name" style="font-weight:800;color:var(--gold)"></span>
+              <span id="league-invite-badge" style="font-size:.75rem;background:rgba(255,215,0,.12);color:var(--gold);padding:3px 10px;border-radius:20px;cursor:pointer" onclick="copyLeagueInvite()" title="클릭하면 복사"></span>
+            </div>
+            <table id="standings-table" style="width:100%;border-collapse:collapse;font-size:.85rem">
+              <thead>
+                <tr style="color:#aaa;border-bottom:1px solid rgba(255,255,255,.07)">
+                  <th style="text-align:left;padding:6px 8px">순위</th>
+                  <th style="text-align:left;padding:6px 8px">선수</th>
+                  <th style="padding:6px 8px">경기</th>
+                  <th style="padding:6px 8px">평점</th>
+                  <th style="padding:6px 8px">이동거리</th>
+                  <th style="padding:6px 8px">최고속도</th>
+                  <th style="padding:6px 8px">점수</th>
+                </tr>
+              </thead>
+              <tbody id="standings-body"></tbody>
+            </table>
+          </div>
+          <p id="league-empty" style="opacity:.35;font-size:.88rem">리그에 참가하면 팀원과 순위를 겨룰 수 있어요.</p>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Progress overlay -->
+<div id="overlay">
+  <div style="font-size:8rem;margin-bottom:8px;filter:drop-shadow(0 0 40px var(--red))">⚽</div>
+  <h1 style="font-size:3rem;font-weight:900;color:var(--red);margin-bottom:6px">TAD AI ANALYSIS</h1>
+  <p style="opacity:.55;margin-bottom:36px">정밀 분석 진행 중...</p>
+  <div class="pbar-wrap"><div id="pbar"></div></div>
+  <div id="p-pct" style="font-size:1.8rem;font-weight:900;margin-top:8px">0%</div>
+  <div id="p-stage" style="color:var(--gold);font-weight:700;margin-top:8px;font-size:.95rem">준비 중...</div>
+  <div id="p-eta" style="opacity:.45;margin-top:6px;font-size:.88rem">예상 시간 계산 중...</div>
+  <div style="margin-top:28px;padding:18px 28px;background:rgba(255,255,255,.05);border-radius:14px;border:1px solid rgba(255,215,0,.2);text-align:center">
+    <p style="color:var(--gold);font-weight:700;margin-bottom:6px">이 페이지를 닫아도 괜찮아요</p>
+    <p style="opacity:.55;font-size:.85rem">분석이 완료되면 가입하신 이메일로 결과 링크를 보내드립니다.</p>
+  </div>
+</div>
+
+<script>
+let SID="", calibPts=[], targetId=null, pInterval=null;
+const canvas=document.getElementById('c-canvas'), ctx=canvas.getContext('2d'), fImg=new Image();
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+window.onload = async () => {
+  setTimeout(()=>document.getElementById('loader').classList.remove('on'), 700);
+  const me = await fetch('/api/me').then(r=>r.json());
+
+  // 이메일 링크로 접근 시 (?sid=...) 바로 결과 로드
+  const urlSid = new URLSearchParams(location.search).get('sid');
+  if(urlSid){
+    SID = urlSid;
+    if(me.logged_in){
+      hideAuth();
+      document.getElementById('hdr-name').innerText = me.username;
+    } else {
+      hideAuth(); // 링크 접근은 로그인 없이도 결과 확인 허용
+    }
+    loadResultFromDB(urlSid);
+    return;
+  }
+
+  if(me.logged_in){
+    hideAuth();
+    document.getElementById('hdr-name').innerText = me.username;
+    show('step-profile');
+  }
+};
+
+async function loadResultFromDB(sid){
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('p-stage').innerText = '결과 불러오는 중...';
+  document.getElementById('p-pct').innerText = '';
+  document.getElementById('p-eta').innerText = '';
+  document.getElementById('pbar').style.width = '100%';
+  const d = await fetch('/results/'+sid).then(r=>r.json());
+  document.getElementById('overlay').classList.remove('on');
+  if(d.error){ alert('오류: '+d.error); return; }
+  if(d.status==='processing'){
+    // 아직 처리 중이면 폴링으로 전환
+    document.getElementById('overlay').classList.add('on');
+    document.getElementById('p-stage').innerText = '분석이 아직 진행 중입니다...';
+    pollProgress();
+    return;
+  }
+  renderDash(d);
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function switchTab(t){
+  ['login','register'].forEach(x=>{
+    document.getElementById('form-'+x).classList.toggle('hidden', x!==t);
+    document.getElementById('tab-'+x).classList.toggle('active', x===t);
+  });
+}
+function hideAuth(){ document.getElementById('auth-modal').classList.add('hidden'); }
+
+async function doLogin(){
+  const email=val('l-email'), pass=val('l-pass');
+  const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})}).then(x=>x.json());
+  if(r.error){ document.getElementById('l-err').innerText=r.error; return; }
+  document.getElementById('hdr-name').innerText=r.username;
+  hideAuth(); show('step-profile');
+}
+async function doRegister(){
+  const name=val('r-name'), email=val('r-email'), pass=val('r-pass');
+  if(pass.length<6){ document.getElementById('r-err').innerText='비밀번호는 6자 이상이어야 합니다.'; return; }
+  const r = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:name,email,password:pass})}).then(x=>x.json());
+  if(r.error){ document.getElementById('r-err').innerText=r.error; return; }
+  document.getElementById('hdr-name').innerText=r.username;
+  hideAuth(); show('step-profile');
+}
+async function doLogout(){
+  await fetch('/api/logout',{method:'POST'});
+  location.reload();
+}
+
+// ── Profile image preview ────────────────────────────────────────────────────
+document.getElementById('pf-img').onchange = e => {
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=ev=>document.getElementById('card-img').src=ev.target.result; rd.readAsDataURL(f);
+};
+
+// ── Step transitions ──────────────────────────────────────────────────────────
+function goUpload(){
+  const p={
+    name: val('pf-name')||'PLAYER',
+    team: val('pf-team')||'FC TEAM',
+    pos:  val('pf-pos') ||'ST',
+    foot: document.getElementById('pf-foot').value,
+    birth:document.getElementById('pf-birth').value.replace(/-/g,'.')||'—'
+  };
+  sessionStorage.setItem('profile', JSON.stringify(p));
+  hide('step-profile'); show('step-upload');
+}
+
+function handleUpload(){
+  const file=document.getElementById('vid-input').files[0]; if(!file) return;
+  const p=JSON.parse(sessionStorage.getItem('profile')||'{}');
+  const fd=new FormData();
+  fd.append('video', file);
+  fd.append('position', p.pos||'ST');
+  fd.append('player_name', p.name||'PLAYER');
+
+  document.getElementById('step-upload').innerHTML="<h1 style='font-size:2.8rem;font-weight:900'>업로드 중...</h1><p style='opacity:.6;margin-top:14px'>첫 프레임 분석 중</p>";
+
+  fetch('/upload',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
+    if(d.error){alert('업로드 오류: '+d.error);return;}
+    SID=d.session_id;
+    fImg.src=d.frame_url;
+    fImg.onload=()=>{
+      const ratio=Math.min(window.innerWidth*.76/fImg.width, 560/fImg.height);
+      canvas.width=fImg.width*ratio; canvas.height=fImg.height*ratio;
+      ctx.drawImage(fImg,0,0,canvas.width,canvas.height);
+      hide('step-upload'); show('step-calib');
+    };
+  }).catch(e=>alert('서버 오류: '+e));
+}
+
+canvas.onclick=e=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=e.clientX-rect.left, y=e.clientY-rect.top;
+  const rx=x*(fImg.width/canvas.width), ry=y*(fImg.height/canvas.height);
+  if(calibPts.length<4){
+    calibPts.push([rx,ry]); dot(x,y,'#ff1a1a',calibPts.length);
+    document.getElementById('c-cnt').innerText=calibPts.length;
+  } else if(!targetId){
+    targetId={x:rx,y:ry}; dot(x,y,'#ffd700','★');
+    document.getElementById('c-status').innerText='선수 선택 완료!';
+    document.getElementById('c-btn').disabled=false;
+  }
+};
+function dot(x,y,col,lbl){
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 13px Outfit'; ctx.fillText(lbl,x+12,y+5);
+}
+
+// ── Auto calibration ──────────────────────────────────────────────────────────
+async function autoCalibrate(){
+  const btn = document.getElementById('auto-btn');
+  const msg = document.getElementById('auto-msg');
+  btn.disabled = true;
+  msg.style.color = '#ffd700';
+  msg.innerText = '경기장 감지 중...';
+
+  try {
+    const r = await fetch(`/api/auto_calibrate/${SID}`).then(x => x.json());
+    if(r.error){
+      msg.style.color = '#f87171';
+      msg.innerText = r.error;
+      btn.disabled = false;
+      return;
+    }
+
+    // 감지된 코너를 캔버스에 표시 (좌상→우상→우하→좌하)
+    resetCalib(false);
+    const scaleX = canvas.width  / r.width;
+    const scaleY = canvas.height / r.height;
+
+    r.corners.forEach((pt, i) => {
+      const cx = pt[0] * scaleX;
+      const cy = pt[1] * scaleY;
+      const rx = pt[0];
+      const ry = pt[1];
+      calibPts.push([rx, ry]);
+      dot(cx, cy, '#ff1a1a', i + 1);
+    });
+    document.getElementById('c-cnt').innerText = calibPts.length;
+    document.getElementById('c-status').innerText = '경기장 자동 감지 완료! 선수를 클릭하세요.';
+    msg.style.color = '#4ade80';
+    msg.innerText = '경기장 4모서리 자동 감지됨. 위치가 정확하지 않으면 초기화 후 수동 클릭하세요.';
+  } catch(e) {
+    msg.style.color = '#f87171';
+    msg.innerText = '서버 오류: ' + e;
+  }
+  btn.disabled = false;
+}
+
+function resetCalib(redraw=true){
+  calibPts = [];
+  targetId = null;
+  document.getElementById('c-cnt').innerText = '0';
+  document.getElementById('c-status').innerHTML = '모서리 <span id="c-cnt">0</span>/4';
+  document.getElementById('c-btn').disabled = true;
+  document.getElementById('auto-msg').innerText = '';
+  if(redraw && fImg.src){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(fImg, 0, 0, canvas.width, canvas.height);
+  }
+}
+
+// ── Analysis ──────────────────────────────────────────────────────────────────
+function startAnalysis(){
+  if(calibPts.length<4||!targetId){alert('경기장 4모서리와 선수를 먼저 클릭하세요.');return;}
+  document.getElementById('overlay').classList.add('on');
+
+  fetch('/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:SID,points:calibPts,target_id:targetId})
+  }).then(r=>r.json()).then(d=>{
+    if(d.error){stopOverlay();alert('오류: '+d.error);return;}
+    pollProgress();
+  }).catch(e=>{stopOverlay();alert('서버 오류: '+e);});
+}
+
+function pollProgress(){
+  const t0=Date.now();
+  pInterval=setInterval(()=>{
+    fetch('/progress/'+SID).then(r=>r.json()).then(d=>{
+      const pct=d.percent||0;
+      document.getElementById('pbar').style.width=pct+'%';
+      document.getElementById('p-pct').innerText=pct+'%';
+      if(d.stage_msg) document.getElementById('p-stage').innerText=d.stage_msg;
+      if(pct>1){
+        const el=(Date.now()-t0)/1000;
+        const remSec=Math.max(0,Math.round((el/pct)*(100-pct)));
+        const etaStr=remSec>=60?`약 ${Math.floor(remSec/60)}분 ${remSec%60}초 남음`:`약 ${remSec}초 남음`;
+        document.getElementById('p-eta').innerText=etaStr;
+      }
+      if(d.status==='completed'){ clearInterval(pInterval); fetchResult(); }
+      else if(d.status==='error'){ clearInterval(pInterval); stopOverlay(); alert('분석 오류: '+(d.message||'')); }
+    });
+  },800);
+}
+
+function fetchResult(){
+  fetch('/results/'+SID).then(r=>r.json()).then(d=>{
+    if(d.status==='processing'){setTimeout(fetchResult,2000);return;}
+    if(d.error){stopOverlay();alert('오류: '+d.error);return;}
+    stopOverlay(); renderDash(d);
+  });
+}
+function stopOverlay(){ clearInterval(pInterval); document.getElementById('overlay').classList.remove('on'); }
+
+// ── Dashboard render ──────────────────────────────────────────────────────────
+function renderDash(data){
+  hide('step-calib'); show('step-dash');
+  const p=tryJSON(sessionStorage.getItem('profile'))||{};
+  document.getElementById('d-name').innerText  = p.name||'PLAYER';
+  document.getElementById('d-pos').innerText   = p.pos||'ST';
+  document.getElementById('d-foot').innerText  = (p.foot||'RIGHT').toUpperCase();
+  document.getElementById('d-birth').innerText = p.birth||'—';
+  document.getElementById('d-team').innerText  = p.team||'—';
+
+  if(data.stats){
+    const s=data.stats;
+    setText('s-pac',s.PAC); setText('s-dri',s.DRI); setText('s-sho',s.SHO);
+    setText('s-pas',s.PAS); setText('s-phy',s.PHY);
+    setText('d-dist', s.total_distance_km??'—');
+    setText('d-spd',  s.top_speed_kmh??'—');
+    setText('d-spr',  s.sprint_count??'—');
+    setText('d-psr',  s.pass_success_rate!=null ? s.pass_success_rate : '—');
+  }
+
+  // 볼터치 배지 표시/숨김
+  const btcWrap = document.getElementById('d-btc-wrap');
+  if(data.pass_stats && data.pass_stats.ball_touch_count != null){
+    setText('d-btc', data.pass_stats.ball_touch_count);
+    btcWrap.style.display = 'inline-flex';
+  } else {
+    btcWrap.style.display = 'none';
+  }
+
+  if(data.heatmap_url) document.getElementById('hm-img').src=data.heatmap_url+'?v='+Date.now();
+
+  if(data.ai_comment){
+    const r=data.ai_comment;
+    document.getElementById('ai-box').innerHTML=`
+      <div style="margin-bottom:16px">
+        <h4 style="color:#4ade80;margin-bottom:8px">◈ STRENGTHS</h4>
+        <ul style="list-style:none;padding-left:10px">${(r.pros||[]).map(p=>`<li style="margin-bottom:5px">✓ ${p}</li>`).join('')||'<li style="opacity:.4">데이터 축적 중</li>'}</ul>
+      </div>
+      <div style="margin-bottom:16px">
+        <h4 style="color:#f87171;margin-bottom:8px">◈ AREAS TO IMPROVE</h4>
+        <ul style="list-style:none;padding-left:10px">${(r.cons||[]).map(c=>`<li style="margin-bottom:5px">⚠ ${c}</li>`).join('')||'<li style="opacity:.4">보완점 없음</li>'}</ul>
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,.1);padding-top:12px">
+        <span style="font-weight:800;color:var(--gold);display:block;margin-bottom:5px">AI SCOUTING NOTE</span>
+        <p style="font-style:italic;opacity:.85;font-size:.9rem">"${r.scouting_note}"</p>
+      </div>`;
+  }
+
+  if(data.video_url){ const v=document.getElementById('main-vid'); v.src=data.video_url; v.play().catch(()=>{}); }
+
+  // ── Category metadata ──────────────────────────────────────────────────
+  const CAT = {
+    'GOAL':        {icon:'⚽', label:'골',        cls:'tag-goal',    sect:'attack'},
+    'SHOT':        {icon:'💥', label:'슈팅',       cls:'tag-attack',  sect:'attack'},
+    'DRIBBLE':     {icon:'🔥', label:'드리블',     cls:'tag-attack',  sect:'attack'},
+    'THROUGH BALL':{icon:'🎯', label:'스루패스',   cls:'tag-attack',  sect:'attack'},
+    'LONG PASS':   {icon:'📐', label:'롱패스',     cls:'tag-mid',     sect:'attack'},
+    'PASS':        {icon:'📐', label:'패스',       cls:'tag-mid',     sect:'midfield'},
+    'BALL TOUCH':  {icon:'🦶', label:'볼터치',     cls:'tag-mid',     sect:'midfield'},
+    'CONTROL':     {icon:'🎱', label:'볼컨트롤',   cls:'tag-mid',     sect:'midfield'},
+    'TACKLE':      {icon:'⚡', label:'태클',       cls:'tag-defense', sect:'defense'},
+    'INTERCEPTION':{icon:'✂️', label:'인터셉트',   cls:'tag-defense', sect:'defense'},
+    'CLEARANCE':   {icon:'💪', label:'클리어링',   cls:'tag-defense', sect:'defense'},
+    'SPRINT':       {icon:'🏃', label:'스프린트',   cls:'tag-mid',     sect:'midfield'},
+    'BALL LOST':    {icon:'❌', label:'볼 손실',    cls:'tag-bad',     sect:'bad'},
+    'BALL CONTEST': {icon:'⚔️', label:'공 다툼',   cls:'tag-defense', sect:'defense'},
+    'ACTIVE PLAY':  {icon:'▶️', label:'활동',       cls:'tag-mid',     sect:'midfield'},
+  };
+  function catInfo(cat){ return CAT[cat] || {icon:'▶️', label:cat, cls:'tag-mid', sect:'midfield'}; }
+
+  window._allHighlights = data.highlights || [];
+  if(data.highlights && data.highlights.length){
+    showSect('all');
+  } else {
+    document.getElementById('reel-all').innerHTML="<p style='opacity:.4'>하이라이트 클립이 없습니다. 더 긴 영상을 사용해 주세요.</p>";
+  }
+
+  // 팀/리그 데이터 로드
+  loadMyTeams();
+  loadMyLeagues();
+
+  // Growth chart
+  fetch('/history').then(r=>r.json()).then(hist=>{
+    if(!hist.length) return;
+    const gCtx=document.getElementById('growth-chart').getContext('2d');
+    new Chart(gCtx,{
+      type:'line',
+      data:{
+        labels: hist.map(h=>h.date?h.date.split(' ')[0]:'—'),
+        datasets:[
+          {label:'PAC',data:hist.map(h=>h.stats?.PAC),borderColor:'#ff1a1a',tension:.4,fill:false},
+          {label:'PHY',data:hist.map(h=>h.stats?.PHY),borderColor:'#ffd700',tension:.4,fill:false},
+          {label:'DRI',data:hist.map(h=>h.stats?.DRI),borderColor:'#4ade80',tension:.4,fill:false},
+        ]
+      },
+      options:{
+        plugins:{legend:{labels:{color:'#fff',font:{size:10}}}},
+        scales:{
+          y:{grid:{color:'rgba(255,255,255,.07)'},ticks:{color:'#fff'}},
+          x:{grid:{color:'rgba(255,255,255,.07)'},ticks:{color:'#fff'}}
+        }
+      }
+    });
+  });
+}
+
+function showSect(sect){
+  document.querySelectorAll('.sect-tab').forEach(t=>t.classList.toggle('active', t.dataset.sect===sect));
+  const reel = document.getElementById('reel-all');
+  reel.innerHTML = '';
+  const list = window._allHighlights || [];
+  const filtered = sect==='all' ? list : list.filter(h=>h.section===sect);
+  if(!filtered.length){
+    reel.innerHTML="<p style='opacity:.4'>해당 섹션의 클립이 없습니다.</p>";
+    return;
+  }
+  filtered.forEach(h=>reel.appendChild(makeClipCard(h)));
+  attachClicks(reel);
+}
+
+function attachClicks(container){
+  container.querySelectorAll('.clip-card').forEach(c=>{
+    c.onclick=()=>{
+      const v=document.getElementById('main-vid');
+      v.src=c.dataset.url; v.play().catch(()=>{});
+    };
+  });
+}
+
+function makeClipCard(h){
+  const info = (typeof CAT!=='undefined' && CAT[h.category]) || {icon:'▶️', label:h.category||'클립', cls:'tag-mid'};
+  const c=document.createElement('div');
+  c.className='clip-card'; c.dataset.url=h.url;
+  c.draggable=true;
+  c.ondragstart=e=>e.dataTransfer.setData('text/plain', h.url);
+  c.innerHTML=`
+    <video src="${h.url}" muted style="width:100%" preload="metadata"></video>
+    <div style="padding:12px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <span class="clip-tag ${info.cls}">${info.icon} ${info.label}</span>
+        ${h.speed_kmh>1?`<span style="font-size:.72rem;opacity:.5;margin-left:8px">${h.speed_kmh} km/h</span>`:''}
+      </div>
+      <a href="${h.url}" download style="color:#fff;font-size:.68rem;font-weight:700;text-decoration:none;border:1px solid var(--border);padding:4px 9px;border-radius:6px" onclick="event.stopPropagation()">SAVE</a>
+    </div>`;
+  return c;
+}
+
+
+function dlCard(){
+  const p=tryJSON(sessionStorage.getItem('profile'))||{};
+  html2canvas(document.getElementById('card-wrap'),{backgroundColor:null,useCORS:true,scale:2}).then(c=>{
+    const a=document.createElement('a');
+    a.download=`${p.name||'player'}_tad_card.png`; a.href=c.toDataURL(); a.click();
+  });
+}
+
+// ── Card & PDF ────────────────────────────────────────────────────────────────
+async function dlCardAPI(){
+  if(!SID){ alert('먼저 분석을 완료하세요.'); return; }
+  const r = await fetch(`/card/${SID}`).then(x=>x.json());
+  if(r.error){ alert('카드 생성 오류: '+r.error); return; }
+  const a = document.createElement('a');
+  a.href = r.card_url; a.download = 'tad_card.png'; a.click();
+}
+
+function dlPDF(){
+  if(!SID){ alert('먼저 분석을 완료하세요.'); return; }
+  window.open(`/report/${SID}`, '_blank');
+}
+
+function openCoachShare(){
+  const f = document.getElementById('coach-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+}
+
+async function sendCoach(){
+  const email = document.getElementById('coach-email').value.trim();
+  const msg   = document.getElementById('coach-msg').value.trim();
+  if(!email){ alert('코치 이메일을 입력하세요.'); return; }
+  const r = await fetch('/api/report/share',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id:SID, coach_email:email, message:msg})
+  }).then(x=>x.json());
+  if(r.error){ alert('발송 오류: '+r.error); return; }
+  alert('PDF 리포트를 코치에게 발송했습니다!');
+  document.getElementById('coach-form').style.display='none';
+}
+
+// ── Team ──────────────────────────────────────────────────────────────────────
+let _currentTeam = null;
+
+function openTeamCreate(){
+  const f = document.getElementById('team-create-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+  document.getElementById('team-join-form').style.display = 'none';
+}
+
+function openTeamJoin(){
+  const f = document.getElementById('team-join-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+  document.getElementById('team-create-form').style.display = 'none';
+}
+
+async function createTeam(){
+  const name = document.getElementById('team-name-inp').value.trim();
+  if(!name){ alert('팀 이름을 입력하세요.'); return; }
+  const r = await fetch('/api/teams/create',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  }).then(x=>x.json());
+  if(r.error){ alert('오류: '+r.error); return; }
+  alert(`팀 "${name}" 생성! 초대코드: ${r.invite_code}`);
+  document.getElementById('team-name-inp').value = '';
+  document.getElementById('team-create-form').style.display = 'none';
+  loadMyTeams();
+}
+
+async function joinTeam(){
+  const code = document.getElementById('team-code-inp').value.trim().toUpperCase();
+  if(!code){ alert('초대코드를 입력하세요.'); return; }
+  const r = await fetch(`/api/teams/join/${code}`,{method:'POST'}).then(x=>x.json());
+  if(r.error){ alert('오류: '+r.error); return; }
+  alert('팀에 참가했습니다!');
+  document.getElementById('team-code-inp').value = '';
+  document.getElementById('team-join-form').style.display = 'none';
+  loadMyTeams();
+}
+
+async function loadMyTeams(){
+  const r = await fetch('/api/teams/my').then(x=>x.json()).catch(()=>({teams:[]}));
+  const list  = document.getElementById('team-list');
+  const empty = document.getElementById('team-empty');
+  list.innerHTML = '';
+  if(!r.teams || !r.teams.length){
+    empty.style.display = 'block';
+    document.getElementById('team-feed-wrap').style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  r.teams.forEach(t=>{
+    const btn = document.createElement('button');
+    btn.textContent = t.name;
+    btn.style.cssText = 'background:rgba(255,26,26,.12);border:1px solid rgba(255,26,26,.3);color:#fff;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.85rem;font-weight:700';
+    btn.onclick = () => showTeamFeed(t);
+    list.appendChild(btn);
+  });
+  if(r.teams.length) showTeamFeed(r.teams[0]);
+}
+
+async function showTeamFeed(team){
+  _currentTeam = team;
+  document.getElementById('team-feed-wrap').style.display = 'block';
+  document.getElementById('team-feed-name').innerText = team.name;
+  document.getElementById('team-invite-badge').innerText = `🔗 ${team.invite_code}`;
+  const r = await fetch(`/api/teams/${team.id}/feed`).then(x=>x.json()).catch(()=>({posts:[]}));
+  const feed = document.getElementById('team-feed');
+  feed.innerHTML = '';
+  if(!r.posts || !r.posts.length){
+    feed.innerHTML = '<p style="opacity:.4;font-size:.85rem">아직 공유된 하이라이트가 없습니다.</p>';
+    return;
+  }
+  r.posts.forEach(post=>{
+    const el = document.createElement('div');
+    el.style.cssText = 'background:#0d0d0d;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px';
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;color:var(--gold);font-size:.85rem">${post.player_name||'선수'}</span>
+        <span style="font-size:.75rem;opacity:.4">${(post.created_at||'').split('T')[0]}</span>
+      </div>
+      ${post.message ? `<p style="font-size:.85rem;opacity:.7;margin-bottom:8px">${post.message}</p>` : ''}
+      ${post.highlight_url ? `<video src="${post.highlight_url}" controls muted style="width:100%;border-radius:8px;max-height:160px"></video>` : ''}`;
+    feed.appendChild(el);
+  });
+}
+
+async function postHighlight(){
+  if(!SID){ alert('먼저 영상 분석을 완료하세요.'); return; }
+  if(!_currentTeam){ alert('팀을 먼저 선택하세요.'); return; }
+  const p = tryJSON(sessionStorage.getItem('profile'))||{};
+  const msg = prompt('한마디 (선택, 엔터로 건너뛰기)') || '';
+  const d = window._allHighlights;
+  const hlUrl = (d && d.length) ? d[0].url : '';
+  const r = await fetch(`/api/teams/${_currentTeam.id}/post`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id:SID, player_name:p.name||'PLAYER', highlight_url:hlUrl, message:msg})
+  }).then(x=>x.json());
+  if(r.error){ alert('오류: '+r.error); return; }
+  alert('하이라이트를 팀 피드에 공유했습니다!');
+  showTeamFeed(_currentTeam);
+}
+
+function copyInvite(){
+  if(!_currentTeam) return;
+  navigator.clipboard.writeText(_currentTeam.invite_code)
+    .then(()=>alert('초대코드 복사됨: '+_currentTeam.invite_code));
+}
+
+// ── League ────────────────────────────────────────────────────────────────────
+let _currentLeague = null;
+
+function openLeagueCreate(){
+  const f = document.getElementById('league-create-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+  document.getElementById('league-join-form').style.display = 'none';
+}
+
+function openLeagueJoin(){
+  const f = document.getElementById('league-join-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+  document.getElementById('league-create-form').style.display = 'none';
+}
+
+async function createLeague(){
+  const name = document.getElementById('league-name-inp').value.trim();
+  if(!name){ alert('리그 이름을 입력하세요.'); return; }
+  const p = tryJSON(sessionStorage.getItem('profile'))||{};
+  const r = await fetch('/api/leagues/create',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, player_name:p.name||'PLAYER', position:p.pos||'ST'})
+  }).then(x=>x.json());
+  if(r.error){ alert('오류: '+r.error); return; }
+  alert(`리그 "${name}" 생성! 초대코드: ${r.invite_code}`);
+  document.getElementById('league-name-inp').value = '';
+  document.getElementById('league-create-form').style.display = 'none';
+  loadMyLeagues();
+}
+
+async function joinLeague(){
+  const code = document.getElementById('league-code-inp').value.trim().toUpperCase();
+  if(!code){ alert('초대코드를 입력하세요.'); return; }
+  const p = tryJSON(sessionStorage.getItem('profile'))||{};
+  const r = await fetch(`/api/leagues/join/${code}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({player_name:p.name||'PLAYER', position:p.pos||'ST'})
+  }).then(x=>x.json());
+  if(r.error){ alert('오류: '+r.error); return; }
+  alert('리그에 참가했습니다!');
+  document.getElementById('league-code-inp').value = '';
+  document.getElementById('league-join-form').style.display = 'none';
+  loadMyLeagues();
+}
+
+async function loadMyLeagues(){
+  const r = await fetch('/api/leagues/my').then(x=>x.json()).catch(()=>({leagues:[]}));
+  const list  = document.getElementById('league-list');
+  const empty = document.getElementById('league-empty');
+  list.innerHTML = '';
+  if(!r.leagues || !r.leagues.length){
+    empty.style.display = 'block';
+    document.getElementById('standings-wrap').style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  r.leagues.forEach(lg=>{
+    const btn = document.createElement('button');
+    btn.textContent = lg.name;
+    btn.style.cssText = 'background:rgba(255,215,0,.1);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:.85rem;font-weight:700';
+    btn.onclick = () => showStandings(lg);
+    list.appendChild(btn);
+  });
+  if(r.leagues.length) showStandings(r.leagues[0]);
+}
+
+async function showStandings(league){
+  _currentLeague = league;
+  document.getElementById('standings-wrap').style.display = 'block';
+  document.getElementById('league-standings-name').innerText = league.name;
+  document.getElementById('league-invite-badge').innerText = `🔗 ${league.invite_code}`;
+  const r = await fetch(`/api/leagues/${league.id}/standings`).then(x=>x.json()).catch(()=>({standings:[]}));
+  const tbody = document.getElementById('standings-body');
+  tbody.innerHTML = '';
+  if(!r.standings || !r.standings.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;opacity:.4">순위 데이터 없음</td></tr>';
+    return;
+  }
+  r.standings.forEach((row, i)=>{
+    const tr = document.createElement('tr');
+    const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1;
+    tr.style.borderBottom = '1px solid rgba(255,255,255,.05)';
+    tr.innerHTML = `
+      <td style="padding:8px;font-weight:700">${medal}</td>
+      <td style="padding:8px;font-weight:700">${row.player_name}</td>
+      <td style="padding:8px;text-align:center;opacity:.7">${row.games}</td>
+      <td style="padding:8px;text-align:center;color:var(--gold);font-weight:800">${row.avg_overall??'—'}</td>
+      <td style="padding:8px;text-align:center;opacity:.7">${row.total_distance??'—'} km</td>
+      <td style="padding:8px;text-align:center;opacity:.7">${row.top_speed??'—'} km/h</td>
+      <td style="padding:8px;text-align:center;color:var(--red);font-weight:800">${row.score??'—'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function copyLeagueInvite(){
+  if(!_currentLeague) return;
+  navigator.clipboard.writeText(_currentLeague.invite_code)
+    .then(()=>alert('초대코드 복사됨: '+_currentLeague.invite_code));
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function show(id){ document.getElementById(id).classList.remove('hidden'); }
+function hide(id){ document.getElementById(id).classList.add('hidden'); }
+function val(id){ return document.getElementById(id).value.trim(); }
+function setText(id,v){ document.getElementById(id).innerText=v??'—'; }
+function tryJSON(s){ try{return JSON.parse(s);}catch(e){return null;} }
+</script>
+</body>
+</html>

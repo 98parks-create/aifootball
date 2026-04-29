@@ -1,0 +1,7 @@
+tracker_type: bytetrack
+track_high_thresh: 0.4      # 낮춰서 더 많은 감지 결과를 1차 매칭에 포함 (핸드폰 영상 대응)
+track_low_thresh: 0.1       # 2차 매칭 임계값
+new_track_thresh: 0.5       # 0.6→0.5 새 트랙 생성 임계값 완화
+track_buffer: 90            # 60→90 최대 3초(90프레임) 트랙 유지 (흔들림/줌 대응)
+match_thresh: 0.85          # 0.8→0.85 엄격한 IoU 매칭으로 ID 혼동 감소
+fuse_score: true            # 신뢰도 점수와 IoU 거리 융합

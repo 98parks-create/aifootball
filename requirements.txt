@@ -1,0 +1,13 @@
+ultralytics
+opencv-python
+flask
+flask-cors
+pandas
+numpy
+matplotlib
+supervision
+scipy
+requests
+Pillow
+python-dotenv
+werkzeug
